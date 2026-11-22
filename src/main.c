@@ -20,12 +20,9 @@ typedef struct {
     u16   last_btns;
     int   last_state;
     int   stick_moved;
-
-    // --- Auto-calibración del centro del stick ---
-    int   analog_center_lx;   // centro real detectado (PCSX2 teclado = 0, hardware real = 128)
+    int   analog_center_lx;
     int   analog_center_ly;
     int   analog_calibrated;
-
     int   forced_mainmode;
 } Player;
 
@@ -60,17 +57,16 @@ static void update_pad(Player *p)
 
     p->last_btns = 0xFFFF ^ bt.btns;
 
-    // D-pad
     if (p->last_btns & PAD_LEFT)  p->x -= MOVE_SPEED;
     if (p->last_btns & PAD_RIGHT) p->x += MOVE_SPEED;
     if (p->last_btns & PAD_UP)    p->y -= MOVE_SPEED;
     if (p->last_btns & PAD_DOWN)  p->y += MOVE_SPEED;
 
-    // Stick analógico con auto-calibración
     int lx = bt.ljoy_h;
     int ly = bt.ljoy_v;
 
-    if (!p->analog_calibrated) {
+    if (!p->analog_calibrated)
+    {
         p->analog_center_lx = lx;
         p->analog_center_ly = ly;
         p->analog_calibrated = 1;
@@ -97,8 +93,7 @@ int main(void)
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
     SifLoadModule("rom0:PADMAN",  0, NULL);
 
-    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC,
-                D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
 
     GSGLOBAL *gs = gsKit_init_global();
     gs->Mode = GS_MODE_NTSC; gs->Interlace = GS_INTERLACED; gs->Field = GS_FRAME;
@@ -123,35 +118,35 @@ int main(void)
         update_pad(&p[0]);
         update_pad(&p[1]);
 
-        // Fondos
-        gsKit_prim_sprite(gs, 0, 0, VIEW_W, SCREEN_H, 1,
-            GS_SETREG_RGBAQ(0x00,0x00,0x60,0x80,0));
-        gsKit_prim_sprite(gs, VIEW_W, 0, SCREEN_W, SCREEN_H, 1,
-            GS_SETREG_RGBAQ(0x60,0x00,0x00,0x80,0));
+        gsKit_prim_sprite(gs, 0, 0, VIEW_W, SCREEN_H, 1, GS_SETREG_RGBAQ(0x00,0x00,0x60,0x80,0));
+        gsKit_prim_sprite(gs, VIEW_W, 0, SCREEN_W, SCREEN_H, 1, GS_SETREG_RGBAQ(0x60,0x00,0x00,0x80,0));
 
-        // Cuadrados
         gsKit_prim_sprite(gs,
             (int)p[0].x, (int)p[0].y,
             (int)p[0].x+PLAYER_SIZE, (int)p[0].y+PLAYER_SIZE,
             2, p[0].color_ok);
+
         gsKit_prim_sprite(gs,
             VIEW_W+(int)p[1].x, (int)p[1].y,
             VIEW_W+(int)p[1].x+PLAYER_SIZE, (int)p[1].y+PLAYER_SIZE,
             2, p[1].color_ok);
 
-        // LEDs de diagnóstico
         gsKit_prim_sprite(gs, 4, 4, 20, 20, 3, state_color(p[0].last_state));
+
         gsKit_prim_sprite(gs, 24, 4, 40, 20, 3,
             (p[0].last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
                                   : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+
         gsKit_prim_sprite(gs, 44, 4, 60, 20, 3,
             p[0].stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
                              : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
 
         gsKit_prim_sprite(gs, VIEW_W+4, 4, VIEW_W+20, 20, 3, state_color(p[1].last_state));
+
         gsKit_prim_sprite(gs, VIEW_W+24, 4, VIEW_W+40, 20, 3,
             (p[1].last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
                                   : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+
         gsKit_prim_sprite(gs, VIEW_W+44, 4, VIEW_W+60, 20, 3,
             p[1].stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
                              : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
@@ -159,5 +154,6 @@ int main(void)
         gsKit_queue_exec(gs);
         gsKit_sync_flip(gs);
     }
+
     return 0;
 }

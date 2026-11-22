@@ -45,3 +45,8 @@ crash-*.dmp
 .env
 .env.local
 *.local
+
+data/raw/*
+data/generated/*
+!data/raw/.gitkeep
+!data/generated/.gitkeep
