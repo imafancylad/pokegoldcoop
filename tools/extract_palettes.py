@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extrae las 5×8 paletas de bg_tiles.pal a un binario simple."""
+"""Extracts the 5×8 palettes from bg_tiles.pal into a simple binary."""
 import re, struct, sys
 from pathlib import Path
 
@@ -30,7 +30,7 @@ def parse_pal(path):
                 data = data[3:].strip()
                 nums = [int(x.strip()) for x in data.split(",")]
                 if len(nums) != 12:
-                    print(f"AVISO: {cur}: esperados 12 valores, tengo {len(nums)}",
+                    print(f"WARNING: {cur}: expected 12 values, got {len(nums)}",
                           file=sys.stderr)
                     continue
                 rgb = []
@@ -46,7 +46,7 @@ def main():
     for name in SECTIONS:
         p = sets[name]
         if len(p) != 8:
-            print(f"AVISO: '{name}' tiene {len(p)} paletas (esperado 8)",
+            print(f"WARNING: '{name}' has {len(p)} palettes (expected 8)",
                   file=sys.stderr)
         flat.extend(p)
 
@@ -57,9 +57,9 @@ def main():
         for pal in flat:
             for (r, g, b) in pal:
                 f.write(bytes((r, g, b, 0xFF)))
-    print(f"OK: {OUT}  ({len(flat)} paletas, {OUT.stat().st_size} bytes)")
+    print(f"OK: {OUT}  ({len(flat)} palettes, {OUT.stat().st_size} bytes)")
     for name in SECTIONS:
-        print(f"   {name}: {len(sets[name])} paletas")
+        print(f"   {name}: {len(sets[name])} palettes")
 
 if __name__ == "__main__":
     main()

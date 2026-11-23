@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convierte johto.png + paletas + tilepal a un tileset RGBA (96 tiles 8x8)."""
+"""Converts johto.png + palettes + tilepal into an RGBA tileset (96 8x8 tiles)."""
 import re, struct, sys
 from pathlib import Path
 from PIL import Image
@@ -21,7 +21,7 @@ SET_OFFSET = SECTIONS.index(PALETTE_SET) * 8
 
 def load_palettes(path):
     with open(path, "rb") as f:
-        assert f.read(4) == b"BPAL", "magic incorrecto en bg_tiles_palettes.bin"
+        assert f.read(4) == b"BPAL", "invalid magic in bg_tiles_palettes.bin"
         count = struct.unpack("<H", f.read(2))[0]
         palettes = []
         for _ in range(count):
@@ -45,10 +45,10 @@ def parse_tilepal(path):
             names = [n.strip() for n in m.group(1).split(",")]
             for name in names:
                 if name not in COLOR_NAME_TO_IDX:
-                    raise ValueError(f"Paleta desconocida: {name}")
+                    raise ValueError(f"Unknown palette: {name}")
                 entries.append(COLOR_NAME_TO_IDX[name])
     if len(entries) < 96:
-        raise ValueError(f"tilepal tiene {len(entries)} entradas, se esperan ≥96")
+        raise ValueError(f"tilepal has {len(entries)} entries, expected ≥96")
     return entries[:96]
 
 def main():
@@ -59,7 +59,7 @@ def main():
     W, H = img.size
     TW, TH = W // 8, H // 8
     if TW * TH < 96:
-        raise ValueError(f"PNG {W}x{H} solo tiene {TW*TH} tiles")
+        raise ValueError(f"PNG {W}x{H} only has {TW*TH} tiles")
     px = img.load()
 
     out = bytearray(TW * TH * 8 * 8 * 4)
@@ -88,7 +88,7 @@ def main():
         f.write(struct.pack("<HH", TW, TH))
         f.write(out)
     print(f"OK: {OUT}  ({TW}x{TH} tiles, {OUT.stat().st_size} bytes)")
-    print(f"     Paleta usada: '{PALETTE_SET}'")
+    print(f"     Palette used: '{PALETTE_SET}'")
 
 if __name__ == "__main__":
     main()

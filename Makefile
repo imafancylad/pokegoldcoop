@@ -11,5 +11,8 @@ main.o: src/main.c
 clean:
 	rm -f *.o *.elf
 
+assets:
+	python3 tools/build_assets.py
+
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
