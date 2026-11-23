@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Convert johto.png + palettes + tilepal into an RGBA tileset (256x256)."""
+"""Convert johto.png + palettes + tilepal into an RGBA tileset (128x128)."""
 import re, struct, sys
 from pathlib import Path
 from PIL import Image
 
 ROOT      = Path.home() / "proyectos/pokegold"
 TILES_PNG = ROOT / "gfx/tilesets/johto.png"
-MAP_ASM   = ROOT / "maps/NewBarkTown.asm"
-PAL_MAP   = ROOT / "gfx/tilesets/johto_palette_map.asm"  # Fallback
+PAL_MAP   = ROOT / "gfx/tilesets/johto_palette_map.asm"
 PAL_BIN   = Path("data/generated/bg_tiles_palettes.bin")
 OUT       = Path("data/generated/johto_tiles.rgba")
 
@@ -20,11 +19,11 @@ PALETTE_SET = "day"
 SECTIONS = ("morn", "day", "nite", "dark", "indoor")
 SET_OFFSET = SECTIONS.index(PALETTE_SET) * 8
 
-# PS2 GS standard dimensions
-TEX_W = 256
-TEX_H = 256
-TILES_W = TEX_W // 8  # 32 tiles per row
-TILES_H = TEX_H // 8  # 32 tiles per column
+# PS2 GS standard dimensions (Power of 2)
+TEX_W = 128
+TEX_H = 128
+TILES_W = TEX_W // 8  # 16 tiles per row
+TILES_H = TEX_H // 8  # 16 tiles per column
 
 def load_palettes(path):
     with open(path, "rb") as f:
@@ -39,17 +38,15 @@ def load_palettes(path):
             palettes.append(colors)
     return palettes
 
-def parse_tilepal_from_file(path, check_map=False):
+def parse_tilepal_from_file(path):
     entries = []
     if not path.exists():
         return entries
-        
     with open(path) as f:
         for line in f:
             s = line.strip()
             if not s or s.startswith(";"):
                 continue
-            
             if s.startswith("tilepal"):
                 parts = s.split(",")
                 for name in parts[1:]:
@@ -60,16 +57,9 @@ def parse_tilepal_from_file(path, check_map=False):
 
 def main():
     palettes = load_palettes(PAL_BIN)
-    
-    # Try reading from the map; if nothing is found, read from the generic file
-    tile_pal_idx = parse_tilepal_from_file(MAP_ASM)
+    tile_pal_idx = parse_tilepal_from_file(PAL_MAP)
     if len(tile_pal_idx) < 96:
-        print("No tilepal found in map. Using generic Johto palette map...")
-        tile_pal_idx = parse_tilepal_from_file(PAL_MAP)
-        
-    if len(tile_pal_idx) < 96:
-        raise ValueError(f"Could not find 96 palettes in any file (found: {len(tile_pal_idx)})")
-        
+        raise ValueError(f"tilepal has {len(tile_pal_idx)} entries, expected >=96")
     tile_pal_idx = tile_pal_idx[:96]
 
     img = Image.open(TILES_PNG).convert("L")
@@ -77,7 +67,6 @@ def main():
     TW, TH = W // 8, H // 8
     px = img.load()
 
-    # Create a 256x256 buffer initialized to black
     out = bytearray(TEX_W * TEX_H * 4)
 
     tile_id = 0
@@ -86,7 +75,6 @@ def main():
             pidx = tile_pal_idx[tile_id]
             palette = palettes[SET_OFFSET + pidx]
             
-            # Calculate position in the new 256x256 texture
             new_tx = tile_id % TILES_W
             new_ty = tile_id // TILES_W
             base = (new_ty * 8 * TEX_W + new_tx * 8) * 4
@@ -107,7 +95,7 @@ def main():
     with open(OUT, "wb") as f:
         f.write(b"JTL1")
         f.write(struct.pack("<HH", TILES_W, TILES_H))
-        f.write(b"\x00" * 8)  # Padding to ensure 16-byte alignment for DMA
+        f.write(b"\x00" * 8) # Padding to ensure 16-byte alignment for DMA
         f.write(out)
     print(f"OK: {OUT}  ({TILES_W}x{TILES_H} tiles, {OUT.stat().st_size} bytes)")
 

@@ -13,8 +13,8 @@
 #define SCALE     2
 #define TILE_SZ   (SRC_TILE * SCALE)    // 16 px on screen
 #define META_SZ   (TILE_SZ * 2)         // 32 px on screen (2x2 tiles)
-#define TEX_TILES_W 32
-#define TEX_TILES_H 32
+#define TEX_TILES_W 16
+#define TEX_TILES_H 16
 
 #define PLAYER_SIZE 24
 #define MOVE_SPEED  4.0f
@@ -75,8 +75,10 @@ static void upload_tileset(void)
     tile_tex.PSM    = GS_PSM_CT32;
     tile_tex.Clut   = GS_CLUT_NONE;
     tile_tex.Filter = GS_FILTER_NEAREST;
-    tile_tex.Mem    = (u32*)&johto_tiles[16];   // 16-byte aligned (header + padding)
-    tile_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(tile_tex.Width, tile_tex.Height, tile_tex.PSM), 2);
+    tile_tex.Mem    = (u32*)&johto_tiles[16];
+    
+    tile_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(tile_tex.Width, tile_tex.Height, tile_tex.PSM), 128);
+        
     gsKit_texture_upload(gs, &tile_tex);
     gsKit_queue_exec(gs);
     gsKit_sync_flip(gs);
@@ -175,10 +177,10 @@ static void render_map(Camera *c, int offset)
                 int tv = (t / TEX_TILES_W) * SRC_TILE;
                 int dx = sx + (i & 1) * TILE_SZ;
                 int dy = sy + (i >> 1) * TILE_SZ;
-                
+                    
                 gsKit_prim_sprite_texture(gs, &tile_tex,
-                    dx, dy, (float)tu + 0.1f, (float)tv + 0.1f,
-                    dx + TILE_SZ, dy + TILE_SZ,
+                    (float)dx, (float)dy, (float)tu, (float)tv,
+                    (float)(dx + TILE_SZ), (float)(dy + TILE_SZ),
                     (float)(tu + SRC_TILE) - 0.1f, (float)(tv + SRC_TILE) - 0.1f,
                     1, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
             }
