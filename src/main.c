@@ -46,6 +46,7 @@ typedef struct {
 static GSGLOBAL *gs;
 static GSTEXTURE tile_tex;
 static Map map;
+static const uint8_t *collision_data;
 
 static u64 state_color(int s)
 {
@@ -66,6 +67,8 @@ static void parse_assets(void)
     map.w = m[4] | (m[5] << 8);
     map.h = m[6] | (m[7] << 8);
     map.blocks = &m[8];
+    
+    collision_data = &johto_collision[6];
 }
 
 static void upload_tileset(void)
@@ -82,6 +85,32 @@ static void upload_tileset(void)
     gsKit_texture_upload(gs, &tile_tex);
     gsKit_queue_exec(gs);
     gsKit_sync_flip(gs);
+}
+
+static int is_tile_walkable(int world_x, int world_y)
+{
+    int bx = world_x / META_SZ;
+    int by = world_y / META_SZ;
+    if (bx < 0 || bx >= map.w || by < 0 || by >= map.h) return 0;
+
+    int in_block_x = (world_x % META_SZ) / TILE_SZ;
+    int in_block_y = (world_y % META_SZ) / TILE_SZ;
+
+    int block_id = map.blocks[by * map.w + bx];
+    const uint8_t *blocks = &johto_blocks[6];
+    int tile_id = blocks[block_id * 4 + (in_block_y * 2 + in_block_x)];
+
+    return (collision_data[tile_id] == 0);
+}
+
+static int is_walkable(float x, float y)
+{
+    int r = 8;
+    if (!is_tile_walkable((int)x - r, (int)y - r)) return 0;
+    if (!is_tile_walkable((int)x + r, (int)y - r)) return 0;
+    if (!is_tile_walkable((int)x - r, (int)y + r)) return 0;
+    if (!is_tile_walkable((int)x + r, (int)y + r)) return 0;
+    return 1;
 }
 
 static void update_player_pad(Player *p)
@@ -102,13 +131,16 @@ static void update_player_pad(Player *p)
     if (!padRead(p->port, p->slot, &bt)) return;
     p->last_btns = 0xFFFF ^ bt.btns;
 
-    if (p->last_btns & PAD_LEFT)  p->wx -= MOVE_SPEED;
-    if (p->last_btns & PAD_RIGHT) p->wx += MOVE_SPEED;
-    if (p->last_btns & PAD_UP)    p->wy -= MOVE_SPEED;
-    if (p->last_btns & PAD_DOWN)  p->wy += MOVE_SPEED;
+    float nx = p->wx;
+    float ny = p->wy;
+
+    if (p->last_btns & PAD_LEFT)  nx -= MOVE_SPEED;
+    if (p->last_btns & PAD_RIGHT) nx += MOVE_SPEED;
+    if (p->last_btns & PAD_UP)    ny -= MOVE_SPEED;
+    if (p->last_btns & PAD_DOWN)  ny += MOVE_SPEED;
 
     int lx = bt.ljoy_h, ly = bt.ljoy_v;
-    
+
     if (!p->analog_calibrated)
     {
         p->analog_center_lx = lx;
@@ -119,18 +151,22 @@ static void update_player_pad(Player *p)
     int dx = lx - p->analog_center_lx;
     int dy = ly - p->analog_center_ly;
     p->stick_moved = 0;
-    if (dx < -STICK_DEADZONE) { p->wx -= MOVE_SPEED; p->stick_moved = 1; }
-    if (dx >  STICK_DEADZONE) { p->wx += MOVE_SPEED; p->stick_moved = 1; }
-    if (dy < -STICK_DEADZONE) { p->wy -= MOVE_SPEED; p->stick_moved = 1; }
-    if (dy >  STICK_DEADZONE) { p->wy += MOVE_SPEED; p->stick_moved = 1; }
+    if (dx < -STICK_DEADZONE) { nx -= MOVE_SPEED; p->stick_moved = 1; }
+    if (dx >  STICK_DEADZONE) { nx += MOVE_SPEED; p->stick_moved = 1; }
+    if (dy < -STICK_DEADZONE) { ny -= MOVE_SPEED; p->stick_moved = 1; }
+    if (dy >  STICK_DEADZONE) { ny += MOVE_SPEED; p->stick_moved = 1; }
 
     float max_wx = (float)(map.w * META_SZ);
     float max_wy = (float)(map.h * META_SZ);
-    if (p->wx < PLAYER_SIZE/2) p->wx = PLAYER_SIZE/2;
-    if (p->wy < PLAYER_SIZE/2) p->wy = PLAYER_SIZE/2;
-    if (p->wx > max_wx - PLAYER_SIZE/2) p->wx = max_wx - PLAYER_SIZE/2;
-    if (p->wy > max_wy - PLAYER_SIZE/2) p->wy = max_wy - PLAYER_SIZE/2;
+    if (nx < PLAYER_SIZE/2) nx = PLAYER_SIZE/2;
+    if (ny < PLAYER_SIZE/2) ny = PLAYER_SIZE/2;
+    if (nx > max_wx - PLAYER_SIZE/2) nx = max_wx - PLAYER_SIZE/2;
+    if (ny > max_wy - PLAYER_SIZE/2) ny = max_wy - PLAYER_SIZE/2;
+
+    if (is_walkable(nx, p->wy)) p->wx = nx;
+    if (is_walkable(p->wx, ny)) p->wy = ny;
 }
+
 
 static void update_camera(Player *p, Camera *c)
 {
