@@ -4,11 +4,12 @@ import re, struct, sys
 from pathlib import Path
 from PIL import Image
 
-ROOT      = Path.home() / "proyectos/pokegold"
-TILES_PNG = ROOT / "gfx/tilesets/johto.png"
-PAL_MAP   = ROOT / "gfx/tilesets/johto_palette_map.asm"
-PAL_BIN   = Path("data/generated/bg_tiles_palettes.bin")
-OUT       = Path("data/generated/johto_tiles.rgba")
+ROOT                = Path.home() / "proyectos/pokegold"
+TILES_PNG           = ROOT / "gfx/tilesets/johto.png"
+PAL_MAP             = ROOT / "gfx/tilesets/johto_palette_map.asm"
+PAL_BIN             = Path("data/generated/bg_tiles_palettes.bin")
+OUT                 = Path("data/generated/johto_tiles.rgba")
+PADDED_TILES_H      = 8 # power of 2 padding (96 -> 128 tiles)
 
 COLOR_NAME_TO_IDX = {
     "GRAY": 0, "RED": 1, "GREEN": 2, "WATER": 3,
@@ -82,7 +83,14 @@ def main():
                     out[off+3] = a
             tile_id += 1
 
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    
+    # pad to power of 2 dimensions
+    padded_len = TW * PADDED_TILES_H * 8 * 8 * 4
+    if len(out) < padded_len:
+        out.extend(b'\x00' * (padded_len - len(out)))
+
     with open(OUT, "wb") as f:
         f.write(b"JTL1")
         f.write(struct.pack("<HH", TW, TH))

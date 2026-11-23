@@ -10,11 +10,11 @@
 #define VIEW_W          (SCREEN_W / 2)
 
 #define SRC_TILE        8
-#define SCALE           4
+#define SCALE           2
 #define TILE_SZ         (SRC_TILE * SCALE)      // 32 px on screen
 #define META_SZ         (TILE_SZ * 2)           // 64 px on screen
 #define TEX_TILES_W     16
-#define TEX_TILES_H     6
+#define TEX_TILES_H     8
 
 #define PLAYER_SIZE     24
 #define MOVE_SPEED      4.0f
