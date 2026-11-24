@@ -8,6 +8,7 @@ ASSETS = [
     ("johto_blocks.bin",      "johto_blocks"),
     ("newbark_map.bin",       "newbark_map"),
     ("johto_collision.bin",   "johto_collision"),
+    ("sprites.rgba",          "sprites"),
 ]
 
 GEN_DIR = Path("data/generated")

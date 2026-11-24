@@ -8,6 +8,7 @@ SCRIPTS = [
     "convert_tileset.py",
     "convert_blockset.py",
     "convert_map.py",
+    "convert_collision.py",
 ]
 
 def main():

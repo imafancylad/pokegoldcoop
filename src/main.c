@@ -16,7 +16,7 @@
 #define TEX_TILES_W 16
 #define TEX_TILES_H 16
 
-#define PLAYER_SIZE 24
+#define PLAYER_SIZE 16
 #define MOVE_SPEED  4.0f
 #define STICK_DEADZONE 40
 
@@ -45,6 +45,7 @@ typedef struct {
 
 static GSGLOBAL *gs;
 static GSTEXTURE tile_tex;
+static GSTEXTURE sprite_tex;
 static Map map;
 static const uint8_t *collision_data;
 
@@ -85,6 +86,17 @@ static void upload_tileset(void)
     gsKit_texture_upload(gs, &tile_tex);
     gsKit_queue_exec(gs);
     gsKit_sync_flip(gs);
+
+    sprite_tex.Width  = 128;
+    sprite_tex.Height = 128;
+    sprite_tex.PSM    = GS_PSM_CT32;
+    sprite_tex.Clut   = GS_CLUT_NONE;
+    sprite_tex.Filter = GS_FILTER_NEAREST;
+    sprite_tex.Mem    = (u32*)&sprites[16];
+    sprite_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(sprite_tex.Width, sprite_tex.Height, sprite_tex.PSM), 128);
+    gsKit_texture_upload(gs, &sprite_tex);
+    gsKit_queue_exec(gs);
+    gsKit_sync_flip(gs);
 }
 
 static int is_tile_walkable(int world_x, int world_y)
@@ -99,6 +111,8 @@ static int is_tile_walkable(int world_x, int world_y)
     int block_id = map.blocks[by * map.w + bx];
     const uint8_t *blocks = &johto_blocks[6];
     int tile_id = blocks[block_id * 4 + (in_block_y * 2 + in_block_x)];
+
+    if (tile_id >= TEX_TILES_W * TEX_TILES_H) return 0;
 
     return (collision_data[tile_id] == 0);
 }
@@ -215,9 +229,9 @@ static void render_map(Camera *c, int offset)
                 int dy = sy + (i >> 1) * TILE_SZ;
                     
                 gsKit_prim_sprite_texture(gs, &tile_tex,
-                    (float)dx, (float)dy, (float)tu, (float)tv,
+                    (float)dx, (float)dy, (float)tu + 0.5f, (float)tv + 0.5f,
                     (float)(dx + TILE_SZ), (float)(dy + TILE_SZ),
-                    (float)(tu + SRC_TILE) - 0.1f, (float)(tv + SRC_TILE) - 0.1f,
+                    (float)(tu + SRC_TILE) - 0.01f, (float)(tv + SRC_TILE) - 0.01f,
                     1, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
             }
         }
@@ -226,9 +240,17 @@ static void render_map(Camera *c, int offset)
 
 static void render_player(Player *p, Camera *c, int offset)
 {
-    int sx = offset + (int)p->wx - c->x - PLAYER_SIZE/2;
-    int sy = (int)p->wy - c->y - PLAYER_SIZE/2;
-    gsKit_prim_sprite(gs, sx, sy, sx + PLAYER_SIZE, sy + PLAYER_SIZE, 2, p->color_ok);
+    int sx = offset + (int)p->wx - c->x - (PLAYER_SIZE * SCALE / 2);
+    int sy = (int)p->wy - c->y - (PLAYER_SIZE * SCALE / 2);
+    
+    float tu = (p->port == 0) ? 0.0f : 16.0f;
+    float tv = 0.0f;
+    
+    gsKit_prim_sprite_texture(gs, &sprite_tex,
+        sx, sy, tu, tv,
+        sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
+        tu + 16, tv + 16,
+        2, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
 }
 
 static void render_leds(Player *p, int offset)
@@ -268,10 +290,8 @@ int main(void)
     upload_tileset();
 
     Player p[2] = {
-        { 0, 0, map.w*META_SZ/2.0f, map.h*META_SZ/2.0f, 0, -1, 0, 0, 0, 0, 0,
-          GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0) },
-        { 1, 0, map.w*META_SZ/2.0f, map.h*META_SZ/2.0f, 0, -1, 0, 0, 0, 0, 0,
-          GS_SETREG_RGBAQ(0x00,0xFF,0xFF,0x80,0) }
+        { 0, 0, 160.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0) },
+        { 1, 0, 192.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0x00,0xFF,0xFF,0x80,0) }
     };
     Camera cam[2];
 
