@@ -233,16 +233,6 @@ static void update_camera(Player *p, Camera *c)
 {
     c->x = (int)p->wx - VIEW_W / 2;
     c->y = (int)p->wy - SCREEN_H / 2;
-    
-    /*int max_x = current_map->w * META_SZ - VIEW_W;
-    int max_y = current_map->h * META_SZ - SCREEN_H;
-    if (max_x < 0) max_x = 0;
-    if (max_y < 0) max_y = 0;
-    if (c->x < 0) c->x = 0;
-    if (c->y < 0) c->y = 0;
-    if (c->x > max_x) c->x = max_x;
-    if (c->y > max_y) c->y = max_y;
-    */
 }
 
 static void render_map(Camera *c, int offset)
@@ -323,6 +313,11 @@ int main(void)
     gs->PSM = GS_PSM_CT24; gs->PSMZ = GS_PSMZ_16S; gs->ZBuffering = GS_SETTING_OFF;
     gsKit_init_screen(gs);
     gsKit_mode_switch(gs, GS_ONESHOT);
+
+    gsKit_set_primalpha(gs, GS_BLEND_BACK2FRONT, 0);
+    gsKit_set_test(gs, GS_ATEST_ON);
+
+    gsKit_set_primalpha(gs, GS_SETREG_ALPHA(0, 1, 0, 1, 0), GS_SETREG_ALPHA(0, 1, 0, 1, 0));
 
     padInit(0);
     padPortOpen(0, 0, pad_buf[0]);
