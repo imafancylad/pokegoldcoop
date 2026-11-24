@@ -41,6 +41,9 @@ typedef struct {
     int   analog_calibrated;
     int   forced_mainmode;
     u64   color_ok;
+    int   direction;
+    int   anim_frame;
+    int   walk_timer;
 } Player;
 
 static GSGLOBAL *gs;
@@ -88,7 +91,7 @@ static void upload_tileset(void)
     gsKit_sync_flip(gs);
 
     sprite_tex.Width  = 128;
-    sprite_tex.Height = 128;
+    sprite_tex.Height = 32;
     sprite_tex.PSM    = GS_PSM_CT32;
     sprite_tex.Clut   = GS_CLUT_NONE;
     sprite_tex.Filter = GS_FILTER_NEAREST;
@@ -145,14 +148,6 @@ static void update_player_pad(Player *p)
     if (!padRead(p->port, p->slot, &bt)) return;
     p->last_btns = 0xFFFF ^ bt.btns;
 
-    float nx = p->wx;
-    float ny = p->wy;
-
-    if (p->last_btns & PAD_LEFT)  nx -= MOVE_SPEED;
-    if (p->last_btns & PAD_RIGHT) nx += MOVE_SPEED;
-    if (p->last_btns & PAD_UP)    ny -= MOVE_SPEED;
-    if (p->last_btns & PAD_DOWN)  ny += MOVE_SPEED;
-
     int lx = bt.ljoy_h, ly = bt.ljoy_v;
 
     if (!p->analog_calibrated)
@@ -164,11 +159,37 @@ static void update_player_pad(Player *p)
 
     int dx = lx - p->analog_center_lx;
     int dy = ly - p->analog_center_ly;
+
+    float nx = p->wx;
+    float ny = p->wy;
+    int is_moving = 0;
+
+    if (p->last_btns & PAD_LEFT)  { nx -= MOVE_SPEED; p->direction = 2; is_moving = 1; }
+    if (p->last_btns & PAD_RIGHT) { nx += MOVE_SPEED; p->direction = 3; is_moving = 1; }
+    if (p->last_btns & PAD_UP)    { ny -= MOVE_SPEED; p->direction = 1; is_moving = 1; }
+    if (p->last_btns & PAD_DOWN)  { ny += MOVE_SPEED; p->direction = 0; is_moving = 1; }
+
     p->stick_moved = 0;
-    if (dx < -STICK_DEADZONE) { nx -= MOVE_SPEED; p->stick_moved = 1; }
-    if (dx >  STICK_DEADZONE) { nx += MOVE_SPEED; p->stick_moved = 1; }
-    if (dy < -STICK_DEADZONE) { ny -= MOVE_SPEED; p->stick_moved = 1; }
-    if (dy >  STICK_DEADZONE) { ny += MOVE_SPEED; p->stick_moved = 1; }
+    if (dx < -STICK_DEADZONE) { nx -= MOVE_SPEED; p->direction = 2; is_moving = 1; p->stick_moved = 1; }
+    if (dx >  STICK_DEADZONE) { nx += MOVE_SPEED; p->direction = 3; is_moving = 1; p->stick_moved = 1; }
+    if (dy < -STICK_DEADZONE) { ny -= MOVE_SPEED; p->direction = 1; is_moving = 1; p->stick_moved = 1; }
+    if (dy >  STICK_DEADZONE) { ny += MOVE_SPEED; p->direction = 0; is_moving = 1; p->stick_moved = 1; }
+
+    if (is_moving)
+    {
+        p->walk_timer++;
+
+        if (p->walk_timer > 8)
+        {
+            p->walk_timer = 0;
+            p->anim_frame = !p->anim_frame;
+        }
+    }
+    else
+    {
+        p->anim_frame = 0;
+        p->walk_timer = 0;
+    }
 
     float max_wx = (float)(map.w * META_SZ);
     float max_wy = (float)(map.h * META_SZ);
@@ -180,7 +201,6 @@ static void update_player_pad(Player *p)
     if (is_walkable(nx, p->wy)) p->wx = nx;
     if (is_walkable(p->wx, ny)) p->wy = ny;
 }
-
 
 static void update_camera(Player *p, Camera *c)
 {
@@ -242,14 +262,15 @@ static void render_player(Player *p, Camera *c, int offset)
 {
     int sx = offset + (int)p->wx - c->x - (PLAYER_SIZE * SCALE / 2);
     int sy = (int)p->wy - c->y - (PLAYER_SIZE * SCALE / 2);
-    
-    float tu = (p->port == 0) ? 0.0f : 16.0f;
-    float tv = 0.0f;
-    
+
+    int tv = p->port * 16;
+
+    int tu = (p->direction * 2 + p->anim_frame) * 16;
+
     gsKit_prim_sprite_texture(gs, &sprite_tex,
-        sx, sy, tu, tv,
+        sx, sy, (float)tu, (float)tv,
         sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
-        tu + 16, tv + 16,
+        (float)(tu + 16), (float)(tv + 16),
         2, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
 }
 
@@ -290,8 +311,8 @@ int main(void)
     upload_tileset();
 
     Player p[2] = {
-        { 0, 0, 160.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0) },
-        { 1, 0, 192.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0x00,0xFF,0xFF,0x80,0) }
+        { 0, 0, 160.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0), 0, 0, 0 },
+        { 1, 0, 192.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0x00,0xFF,0xFF,0x80,0), 0, 0, 0 }
     };
     Camera cam[2];
 
