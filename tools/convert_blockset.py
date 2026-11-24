@@ -13,30 +13,21 @@ def main():
     max_id = max(blk)
     raw = METATILES.read_bytes()
     size = len(raw)
-    print(f"Max metatile in NewBarkTown: {max_id}")
-    print(f"Size of johto_metatiles.bin: {size} bytes")
 
-    if size % 4 == 0 and size // 4 >= max_id + 1:
-        fmt, n, tiles = "u8", size // 4, raw
-    elif size % 8 == 0 and size // 8 >= max_id + 1:
-        fmt, n = "u16", size // 8
-        tiles = bytearray()
-        for i in range(n):
-            for j in range(4):
-                t = struct.unpack("<H", raw[i*8+j*2:i*8+j*2+2])[0]
-                if t > 255:
-                    sys.exit(f"tile ID {t} > 255 in metatile {i}, does not fit in u8")
-                tiles.append(t)
-    else:
-        sys.exit(f"Unknown format: size={size}, max_id={max_id}")
+    if size % 16 != 0:
+        sys.exit(f"unexpected size in johto_metatiles.bin: {size} bytes")
 
-    print(f"Detected format: {fmt}, {n} metatiles")
+    n = size // 16
+    if n <= max_id:
+        sys.exit(f"metatiles missing: n={n}, max_id={max_id}")
+
+    print(f"Detected format: u8x16 (4x4 tiles), {n} metatiles")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "wb") as f:
         f.write(b"JBLK")
         f.write(struct.pack("<H", n))
-        f.write(tiles)
+        f.write(raw)
     print(f"OK: {OUT} ({n} metatiles, {OUT.stat().st_size} bytes)")
 
 if __name__ == "__main__":

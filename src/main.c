@@ -11,8 +11,8 @@
 
 #define SRC_TILE  8
 #define SCALE     2
-#define TILE_SZ   (SRC_TILE * SCALE)    // 16 px on screen
-#define META_SZ   (TILE_SZ * 2)         // 32 px on screen (2x2 tiles)
+#define TILE_SZ   (SRC_TILE * SCALE)
+#define META_SZ   (TILE_SZ * 4)
 #define TEX_TILES_W 16
 #define TEX_TILES_H 16
 
@@ -25,7 +25,8 @@ static char pad_buf[2][256] __attribute__((aligned(64)));
 typedef struct {
     int w, h;
     const uint8_t *blocks;
-} Map;
+    const uint8_t *collision;
+} GameMap;
 
 typedef struct {
     int x, y;
@@ -49,8 +50,10 @@ typedef struct {
 static GSGLOBAL *gs;
 static GSTEXTURE tile_tex;
 static GSTEXTURE sprite_tex;
-static Map map;
-static const uint8_t *collision_data;
+
+static GameMap maps[2];
+static int current_map_id = 0;
+static GameMap *current_map = &maps[0];
 
 static u64 state_color(int s)
 {
@@ -67,12 +70,17 @@ static u64 state_color(int s)
 
 static void parse_assets(void)
 {
-    const uint8_t *m = newbark_map;
-    map.w = m[4] | (m[5] << 8);
-    map.h = m[6] | (m[7] << 8);
-    map.blocks = &m[8];
-    
-    collision_data = &johto_collision[6];
+    // New Bark Town (ID 0)
+    maps[0].w = newbark_map[4] | (newbark_map[5] << 8);
+    maps[0].h = newbark_map[6] | (newbark_map[7] << 8);
+    maps[0].blocks = &newbark_map[8];
+    maps[0].collision = &johto_collision[6];
+
+    // Route 29 (ID 1)
+    maps[1].w = route29_map[4] | (route29_map[5] << 8);
+    maps[1].h = route29_map[6] | (route29_map[7] << 8);
+    maps[1].blocks = &route29_map[8];
+    maps[1].collision = &johto_collision[6]; // same collision table
 }
 
 static void upload_tileset(void)
@@ -81,11 +89,9 @@ static void upload_tileset(void)
     tile_tex.Height = TEX_TILES_H * SRC_TILE;
     tile_tex.PSM    = GS_PSM_CT32;
     tile_tex.Clut   = GS_CLUT_NONE;
-    tile_tex.Filter = GS_FILTER_NEAREST;
+    tile_tex.Filter = GS_FILTER_NEAREST; // do not touch this
     tile_tex.Mem    = (u32*)&johto_tiles[16];
-    
     tile_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(tile_tex.Width, tile_tex.Height, tile_tex.PSM), 128);
-        
     gsKit_texture_upload(gs, &tile_tex);
     gsKit_queue_exec(gs);
     gsKit_sync_flip(gs);
@@ -94,7 +100,7 @@ static void upload_tileset(void)
     sprite_tex.Height = 32;
     sprite_tex.PSM    = GS_PSM_CT32;
     sprite_tex.Clut   = GS_CLUT_NONE;
-    sprite_tex.Filter = GS_FILTER_NEAREST;
+    sprite_tex.Filter = GS_FILTER_NEAREST; // do not touch this
     sprite_tex.Mem    = (u32*)&sprites[16];
     sprite_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(sprite_tex.Width, sprite_tex.Height, sprite_tex.PSM), 128);
     gsKit_texture_upload(gs, &sprite_tex);
@@ -106,22 +112,23 @@ static int is_tile_walkable(int world_x, int world_y)
 {
     int bx = world_x / META_SZ;
     int by = world_y / META_SZ;
-    if (bx < 0 || bx >= map.w || by < 0 || by >= map.h) return 0;
+    if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h) return 0;
 
-    int in_block_x = (world_x % META_SZ) / TILE_SZ;
-    int in_block_y = (world_y % META_SZ) / TILE_SZ;
+    int in_block_x = (world_x % META_SZ) / TILE_SZ; // 0..3
+    int in_block_y = (world_y % META_SZ) / TILE_SZ; // 0..3
 
-    int block_id = map.blocks[by * map.w + bx];
+    int block_id = current_map->blocks[by * current_map->w + bx];
     const uint8_t *blocks = &johto_blocks[6];
-    int tile_id = blocks[block_id * 4 + (in_block_y * 2 + in_block_x)];
+    int tile_id = blocks[block_id * 16 + (in_block_y * 4 + in_block_x)]; // *16, *4
 
     if (tile_id >= TEX_TILES_W * TEX_TILES_H) return 0;
 
-    return (collision_data[tile_id] == 0);
+    return (current_map->collision[tile_id] == 0);
 }
 
 static int is_walkable(float x, float y)
 {
+    // put return 1 to make collisions unavailable
     int r = 8;
     if (!is_tile_walkable((int)x - r, (int)y - r)) return 0;
     if (!is_tile_walkable((int)x + r, (int)y - r)) return 0;
@@ -178,12 +185,7 @@ static void update_player_pad(Player *p)
     if (is_moving)
     {
         p->walk_timer++;
-
-        if (p->walk_timer > 8)
-        {
-            p->walk_timer = 0;
-            p->anim_frame = !p->anim_frame;
-        }
+        if (p->walk_timer > 12) { p->walk_timer = 0; p->anim_frame = !p->anim_frame; } // frame velocity (change 8 to what you like)
     }
     else
     {
@@ -191,8 +193,8 @@ static void update_player_pad(Player *p)
         p->walk_timer = 0;
     }
 
-    float max_wx = (float)(map.w * META_SZ);
-    float max_wy = (float)(map.h * META_SZ);
+    float max_wx = (float)(current_map->w * META_SZ);
+    float max_wy = (float)(current_map->h * META_SZ);
     if (nx < PLAYER_SIZE/2) nx = PLAYER_SIZE/2;
     if (ny < PLAYER_SIZE/2) ny = PLAYER_SIZE/2;
     if (nx > max_wx - PLAYER_SIZE/2) nx = max_wx - PLAYER_SIZE/2;
@@ -202,18 +204,45 @@ static void update_player_pad(Player *p)
     if (is_walkable(p->wx, ny)) p->wy = ny;
 }
 
+static void check_map_transition(Player *p1, Player *p2)
+{
+    // if right corner == route29
+    if (current_map_id == 0 && p1->wx > (current_map->w * META_SZ) - 8)
+    {
+        current_map_id = 1;
+        current_map = &maps[1];
+        p1->wx = 16.0f;
+        p1->wy = current_map->h * META_SZ / 2.0f;
+        p2->wx = 48.0f;
+        p2->wy = current_map->h * META_SZ / 2.0f;
+    }
+
+    // if left corner == new bark map
+    else if (current_map_id == 1 && p1->wx < 16.0f)
+    {
+        current_map_id = 0;
+        current_map = &maps[0];
+        p1->wx = (current_map->w * META_SZ) - 32.0f;
+        p1->wy = current_map->h * META_SZ / 2.0f;
+        p2->wx = (current_map->w * META_SZ) - 64.0f;
+        p2->wy = current_map->h * META_SZ / 2.0f;
+    }
+}
+
 static void update_camera(Player *p, Camera *c)
 {
     c->x = (int)p->wx - VIEW_W / 2;
     c->y = (int)p->wy - SCREEN_H / 2;
-    int max_x = map.w * META_SZ - VIEW_W;
-    int max_y = map.h * META_SZ - SCREEN_H;
+    
+    /*int max_x = current_map->w * META_SZ - VIEW_W;
+    int max_y = current_map->h * META_SZ - SCREEN_H;
     if (max_x < 0) max_x = 0;
     if (max_y < 0) max_y = 0;
     if (c->x < 0) c->x = 0;
     if (c->y < 0) c->y = 0;
     if (c->x > max_x) c->x = max_x;
     if (c->y > max_y) c->y = max_y;
+    */
 }
 
 static void render_map(Camera *c, int offset)
@@ -226,28 +255,28 @@ static void render_map(Camera *c, int offset)
     int by_end   = (c->y + SCREEN_H) / META_SZ + 1;
     if (bx_start < 0) bx_start = 0;
     if (by_start < 0) by_start = 0;
-    if (bx_end > map.w) bx_end = map.w;
-    if (by_end > map.h) by_end = map.h;
+    if (bx_end > current_map->w) bx_end = current_map->w;
+    if (by_end > current_map->h) by_end = current_map->h;
 
     for (int by = by_start; by < by_end; by++)
     {
         for (int bx = bx_start; bx < bx_end; bx++)
         {
-            int bidx = map.blocks[by * map.w + bx];
-            const uint8_t *mt = &blocks[bidx * 4];
+            int bidx = current_map->blocks[by * current_map->w + bx];
+            const uint8_t *mt = &blocks[bidx * 16];
 
             int sx = offset + bx * META_SZ - c->x;
             int sy = by * META_SZ - c->y;
 
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 16; i++)
             {
                 int t = mt[i];
                 if (t >= TEX_TILES_W * TEX_TILES_H) continue;
                 int tu = (t % TEX_TILES_W) * SRC_TILE;
                 int tv = (t / TEX_TILES_W) * SRC_TILE;
-                int dx = sx + (i & 1) * TILE_SZ;
-                int dy = sy + (i >> 1) * TILE_SZ;
-                    
+                int dx = sx + (i & 3) * TILE_SZ;
+                int dy = sy + (i >> 2) * TILE_SZ;
+
                 gsKit_prim_sprite_texture(gs, &tile_tex,
                     (float)dx, (float)dy, (float)tu + 0.5f, (float)tv + 0.5f,
                     (float)(dx + TILE_SZ), (float)(dy + TILE_SZ),
@@ -262,11 +291,10 @@ static void render_player(Player *p, Camera *c, int offset)
 {
     int sx = offset + (int)p->wx - c->x - (PLAYER_SIZE * SCALE / 2);
     int sy = (int)p->wy - c->y - (PLAYER_SIZE * SCALE / 2);
-
+    
     int tv = p->port * 16;
-
     int tu = (p->direction * 2 + p->anim_frame) * 16;
-
+    
     gsKit_prim_sprite_texture(gs, &sprite_tex,
         sx, sy, (float)tu, (float)tv,
         sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
@@ -277,14 +305,8 @@ static void render_player(Player *p, Camera *c, int offset)
 static void render_leds(Player *p, int offset)
 {
     gsKit_prim_sprite(gs, offset+4, 4, offset+20, 20, 3, state_color(p->last_state));
-
-    gsKit_prim_sprite(gs, offset+24, 4, offset+40, 20, 3,
-        (p->last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
-                            : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
-
-    gsKit_prim_sprite(gs, offset+44, 4, offset+60, 20, 3,
-        p->stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
-                       : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+    gsKit_prim_sprite(gs, offset+24, 4, offset+40, 20, 3, (p->last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0) : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+    gsKit_prim_sprite(gs, offset+44, 4, offset+60, 20, 3, p->stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0) : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
 }
 
 int main(void)
@@ -293,8 +315,7 @@ int main(void)
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
     SifLoadModule("rom0:PADMAN",  0, NULL);
 
-    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC,
-                D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
 
     gs = gsKit_init_global();
     gs->Mode = GS_MODE_NTSC; gs->Interlace = GS_INTERLACED; gs->Field = GS_FRAME;
@@ -311,8 +332,8 @@ int main(void)
     upload_tileset();
 
     Player p[2] = {
-        { 0, 0, 160.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0), 0, 0, 0 },
-        { 1, 0, 192.0f, 144.0f, 0, -1, 0, 0, 0, 0, 0, GS_SETREG_RGBAQ(0x00,0xFF,0xFF,0x80,0), 0, 0, 0 }
+        { 0, 0, 320.0f, 400.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 352.0f, 400.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
     };
     Camera cam[2];
 
@@ -320,6 +341,10 @@ int main(void)
     {
         update_player_pad(&p[0]);
         update_player_pad(&p[1]);
+        
+        // map transition comprobation
+        check_map_transition(&p[0], &p[1]);
+
         update_camera(&p[0], &cam[0]);
         update_camera(&p[1], &cam[1]);
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build sprites.rgba with 8 frames per player (down x2, up x2, left x2, right x2)."""
+"""Build sprites.rgba with 8 frames per player and transparent background."""
 import struct
 from pathlib import Path
 from PIL import Image, ImageOps
@@ -13,7 +13,6 @@ SPRITES = {
 }
 
 def extract_frames(img):
-    """Returns 6 16x16 frames (down stand, down walk, up stand, up walk, left stand, left walk)."""
     frames = []
     for i in range(6):
         top = i * 16
@@ -25,23 +24,37 @@ def extract_frames(img):
 
 def main():
     TEX_W = 128
-    TEX_H = 32
+    TEX_H = 32   
     out = bytearray(TEX_W * TEX_H * 4)
 
     for idx, (name, path) in enumerate(SPRITES.items()):
         if not path.exists():
-            print(f"WARNING: {path} no existe, saltando")
+            print(f"WARNING: {path} no existe")
             continue
 
         img = Image.open(path).convert("RGBA")
-        print(f"{name}: {img.width}x{img.height}")
+        
+        bg_color = img.getpixel((0, 0))[:3]
+        
+        datas = img.getdata()
+        new_data = []
+        for item in datas:
+            if item[:3] == bg_color:
+                new_data.append((0, 0, 0, 0))
+            else:
+                new_data.append(item)
+        img.putdata(new_data)
 
         f = extract_frames(img)
+        # f[0], f[1] = down (stand, walk)
+        # f[2], f[3] = left (stand, walk)
+        # f[4], f[5] = up (stand, walk)
+        
         variants = [
-            f[0], f[3],
-            f[1], f[4],
-            f[2], f[5],
-            ImageOps.mirror(f[2]), ImageOps.mirror(f[5])
+            f[0], f[1],
+            f[4], f[5],
+            f[2], f[3],
+            ImageOps.mirror(f[2]), ImageOps.mirror(f[3])
         ]
 
         base_y = idx * 16
@@ -62,12 +75,6 @@ def main():
                         out[off+1] = g
                         out[off+2] = b
                         out[off+3] = 255
-
-    img = Image.open(SPRITES["chris"]).convert("RGBA")
-    f0 = img.crop((0, 0, 16, 16))
-    f1 = img.crop((0, 16, 16, 32))
-    diff = sum(1 for x in range(16) for y in range(16) if f0.getpixel((x,y)) != f1.getpixel((x,y)))
-    print(f"different pixel frame 0 and 1 from Chris: {diff}/256")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "wb") as f:
