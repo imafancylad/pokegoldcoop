@@ -8,6 +8,13 @@ OUT = Path("data/generated/sprites.rgba")
 
 PALETTE_J1 = [(255, 200, 180), (220, 80, 80), (120, 40, 40), (30, 20, 20)]
 PALETTE_J2 = [(200, 220, 255), (80, 120, 220), (40, 60, 120), (20, 20, 30)]
+PALETTE_MOM = [(240, 220, 200), (200, 120, 80), (120, 60, 40), (40, 20, 10)]
+
+SPRITES = [
+    ("chris", ROOT / "chris.png", PALETTE_J1),
+    ("rival", ROOT / "rival.png", PALETTE_J2),
+    ("mom",   ROOT / "mom.png",   PALETTE_MOM),
+]
 
 def remove_bg(img):
     img = img.convert("RGBA")
@@ -29,21 +36,20 @@ def remove_bg(img):
     return img
 
 def main():
-    TEX_W, TEX_H = 128, 32
+    TEX_W, TEX_H = 128, 48
     out = bytearray(TEX_W * TEX_H * 4)
 
-    for idx, name in enumerate(["chris", "rival"]):
-        path = ROOT / f"{name}.png"
-        if not path.exists(): continue
+    for idx, (name, path, palette) in enumerate(SPRITES):
+        if not path.exists():
+            print(f"WARNING: {path} no existe, saltando")
+            continue
         img = remove_bg(Image.open(path))
-        palette = PALETTE_J1 if idx == 0 else PALETTE_J2
-
-        f = [img.crop((0, i*16, 16, i*16+16)) for i in range(6)]
+        frames = [img.crop((0, i*16, 16, i*16+16)) for i in range(6)]
         variants = [
-            f[0], f[3],                                     # down: stand + walk
-            f[1], f[4],                                     # up: stand + walk
-            f[2], f[5],                                     # left: stand + walk
-            ImageOps.mirror(f[2]), ImageOps.mirror(f[5])    # right: mirror de left
+            frames[0], frames[3],                                   # down
+            frames[1], frames[4],                                   # up
+            frames[2], frames[5],                                   # left
+            ImageOps.mirror(frames[2]), ImageOps.mirror(frames[5])  # right
         ]
 
         base_y = idx * 16
@@ -66,7 +72,6 @@ def main():
     with open(OUT, "wb") as f:
         f.write(b"SPR1")
         f.write(struct.pack("<HH", TEX_W, TEX_H))
-        f.write(b"\x00" * 8)
         f.write(out)
     print(f"OK: {OUT} ({len(out)} bytes)")
 

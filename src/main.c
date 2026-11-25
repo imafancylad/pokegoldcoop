@@ -3,6 +3,7 @@
 #include <libpad.h>
 #include <loadfile.h>
 #include <sifrpc.h>
+#include <math.h>
 #include "assets_data.h"
 
 #define SCREEN_W 640
@@ -33,6 +34,12 @@ typedef struct {
 } Camera;
 
 typedef struct {
+    float x, y;
+    int tex_row;
+    const char *dialog;
+} NPC;
+
+typedef struct {
     int   port, slot;
     float wx, wy;
     u16   last_btns;
@@ -50,6 +57,12 @@ typedef struct {
 static GSGLOBAL *gs;
 static GSTEXTURE tile_tex;
 static GSTEXTURE sprite_tex;
+
+static NPC npc = { 320.0f, 320.0f, 2, "hola elisabet, te amo mucho preciosa." };
+static int dialog_open = 0;
+static int blink_timer = 0;
+static int dialog_owner = -1;
+static u16 prev_cross[2] = { 0, 0 };
 
 static GameMap maps[2];
 static int current_map_id = 0;
@@ -125,6 +138,12 @@ static int is_walkable(float x, float y)
     if (!is_tile_walkable((int)x + r, (int)y - r)) return 0;
     if (!is_tile_walkable((int)x - r, (int)y + r)) return 0;
     if (!is_tile_walkable((int)x + r, (int)y + r)) return 0;
+
+    if (current_map_id == 0)
+    {
+        if (fabsf(x - npc.x) < 28.0f && fabsf(y - npc.y) < 28.0f) return 0;
+    }
+
     return 1;
 }
 
@@ -321,6 +340,21 @@ static void render_map(Camera *c, int offset)
     }
 }
 
+static void render_npc(NPC *n, Camera *c, int offset)
+{
+    if (current_map_id != 0) return;                                    // only in New Bark Town
+    int sx = offset + (int)n->x - c->x - (PLAYER_SIZE * SCALE / 2);
+    int sy = (int)n->y - c->y - (PLAYER_SIZE * SCALE / 2);
+    int tv = n->tex_row * 16;
+    int tu = 0;                                                         // frame 0: looking down
+
+    gsKit_prim_sprite_texture(gs, &sprite_tex,
+        sx, sy, (float)tu, (float)tv,
+        sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
+        (float)(tu + 16), (float)(tv + 16),
+        2, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
+}
+
 static void render_player(Player *p, Camera *c, int offset)
 {
     int tu = (p->direction * 2 + p->anim_frame) * 16;
@@ -334,6 +368,27 @@ static void render_player(Player *p, Camera *c, int offset)
         sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
         (float)(tu + 16), (float)(tv + 16),
         2, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
+}
+
+static void render_dialog(int offset)
+{
+    if (!dialog_open) return;
+    int bx = offset + 20;
+    int by = SCREEN_H - 120;
+    int bw = VIEW_W - 40;
+    int bh = 100;
+
+    gsKit_prim_sprite(gs, bx, by, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(20, 20, 60, 0x80, 0));
+
+    gsKit_prim_sprite(gs, bx, by, bx+bw, by+4, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
+    gsKit_prim_sprite(gs, bx, by+bh-4, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
+    gsKit_prim_sprite(gs, bx, by, bx+4, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
+    gsKit_prim_sprite(gs, bx+bw-4, by, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
+
+    if ((blink_timer / 30) % 2 == 0)
+    {
+        gsKit_prim_sprite(gs, bx+bw-30, by+bh-20, bx+bw-10, by+bh-10, 11, GS_SETREG_RGBAQ(255, 255, 100, 0x80, 0));
+    }
 }
 
 int main(void)
@@ -370,11 +425,40 @@ int main(void)
 
     while (1)
     {
+        blink_timer++;
         update_player_pad(&p[0]);
         update_player_pad(&p[1]);
         
         // map transition comprobation
         check_map_transition(&p[0], &p[1]);
+
+        for (int i = 0; i < 2; i++)
+        {
+            u16 cur = (p[i].last_btns & PAD_CROSS) ? 1 : 0;
+            int just_pressed = (cur && !prev_cross[i]);
+            prev_cross[i] = cur;
+
+            if (just_pressed)
+            {
+                if (!dialog_open)
+                {
+                    float dx = p[i].wx - npc.x;
+                    float dy = p[i].wy - npc.y;
+
+                    if (current_map_id == 0 && fabsf(dx) < 60.0f && fabsf(dy) < 60.0f)
+                    {
+                        dialog_open = 1;
+                        dialog_owner = i;
+                    }
+
+                }
+                else if (dialog_owner == i)
+                {
+                    dialog_open = 0;
+                    dialog_owner = -1;
+                }
+            }
+        }
 
         update_camera(&p[0], &cam[0]);
         update_camera(&p[1], &cam[1]);
@@ -382,13 +466,17 @@ int main(void)
         gsKit_set_scissor(gs, GS_SETREG_SCISSOR(0, VIEW_W-1, 0, SCREEN_H-1));
         gsKit_prim_sprite(gs, 0, 0, VIEW_W, SCREEN_H, 0, GS_SETREG_RGBAQ(0x10,0x10,0x30,0x80,0));
         render_map(&cam[0], 0);
+        render_npc(&npc, &cam[0], 0);
         render_player(&p[0], &cam[0], 0);
+        render_dialog(0);
         gsKit_queue_exec(gs);
 
         gsKit_set_scissor(gs, GS_SETREG_SCISSOR(VIEW_W, SCREEN_W-1, 0, SCREEN_H-1));
         gsKit_prim_sprite(gs, VIEW_W, 0, SCREEN_W, SCREEN_H, 0, GS_SETREG_RGBAQ(0x10,0x10,0x30,0x80,0));
         render_map(&cam[1], VIEW_W);
+        render_npc(&npc, &cam[1], VIEW_W);
         render_player(&p[1], &cam[1], VIEW_W);
+        render_dialog(VIEW_W);
         gsKit_queue_exec(gs);
 
         gsKit_sync_flip(gs);
