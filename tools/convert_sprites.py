@@ -6,49 +6,44 @@ from PIL import Image, ImageOps
 ROOT = Path.home() / "proyectos/pokegold/gfx/sprites"
 OUT = Path("data/generated/sprites.rgba")
 
-SPRITES = {
-    "chris": ROOT / "chris.png",
-    "rival": ROOT / "rival.png",
-}
+PALETTE_J1 = [(255, 200, 180), (220, 80, 80), (120, 40, 40), (30, 20, 20)]
+PALETTE_J2 = [(200, 220, 255), (80, 120, 220), (40, 60, 120), (20, 20, 30)]
 
-def extract_frames(img):
-    frames = []
-    for i in range(6):
-        top = i * 16
-        if top + 16 > img.height:
-            frames.append(Image.new("RGBA", (16, 16), (0, 0, 0, 0)))
-            continue
-        frames.append(img.crop((0, top, 16, top + 16)))
-    return frames
+def remove_bg(img):
+    img = img.convert("RGBA")
+    w, h = img.size
+    px = img.load()
+    bg = px[0, 0][:3]
+    q = [(0, 0)]
+    seen = set()
+    while q:
+        x, y = q.pop(0)
+        if (x, y) in seen: continue
+        seen.add((x, y))
+        if px[x, y][:3] == bg:
+            px[x, y] = (0, 0, 0, 0)
+            if x > 0: q.append((x-1, y))
+            if x < w-1: q.append((x+1, y))
+            if y > 0: q.append((x, y-1))
+            if y < h-1: q.append((x, y+1))
+    return img
 
 def main():
-    TEX_W = 128
-    TEX_H = 32   
+    TEX_W, TEX_H = 128, 32
     out = bytearray(TEX_W * TEX_H * 4)
 
-    for idx, (name, path) in enumerate(SPRITES.items()):
-        if not path.exists():
-            continue
+    for idx, name in enumerate(["chris", "rival"]):
+        path = ROOT / f"{name}.png"
+        if not path.exists(): continue
+        img = remove_bg(Image.open(path))
+        palette = PALETTE_J1 if idx == 0 else PALETTE_J2
 
-        img = Image.open(path).convert("RGBA")
-        
-        bg_color = img.getpixel((0, 0))
-        datas = img.getdata()
-        new_data = []
-        for item in datas:
-            if item[:3] == bg_color[:3]:
-                new_data.append((0, 0, 0, 0))
-            else:
-                new_data.append(item)
-        img.putdata(new_data)
-
-        f = extract_frames(img)
-        # down (0,1), up (4,5), left (2,3), right (flip)
+        f = [img.crop((0, i*16, 16, i*16+16)) for i in range(6)]
         variants = [
-            f[0], f[1],                                     # down
-            f[4], f[5],                                     # up
-            f[2], f[3],                                     # left
-            ImageOps.mirror(f[2]), ImageOps.mirror(f[3])    # right
+            f[0], f[3],                                     # down: stand + walk
+            f[1], f[4],                                     # up: stand + walk
+            f[2], f[5],                                     # left: stand + walk
+            ImageOps.mirror(f[2]), ImageOps.mirror(f[5])    # right: mirror de left
         ]
 
         base_y = idx * 16
@@ -59,22 +54,19 @@ def main():
                 for x in range(16):
                     r, g, b, a = px[x, y]
                     off = ((base_y + y) * TEX_W + (base_x + x)) * 4
-                    
                     if a < 32:
-                        out[off+0] = 0
-                        out[off+1] = 0
-                        out[off+2] = 0
-                        out[off+3] = 0
+                        out[off:off+4] = b'\x00\x00\x00\x00'
                     else:
-                        out[off+0] = r
-                        out[off+1] = g
-                        out[off+2] = b
-                        out[off+3] = 255
+                        lum = (r + g + b) // 3
+                        lvl = min(3, lum // 64)
+                        cr, cg, cb = palette[lvl]
+                        out[off:off+4] = bytes((cr, cg, cb, 255))
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "wb") as f:
         f.write(b"SPR1")
         f.write(struct.pack("<HH", TEX_W, TEX_H))
+        f.write(b"\x00" * 8)
         f.write(out)
     print(f"OK: {OUT} ({len(out)} bytes)")
 

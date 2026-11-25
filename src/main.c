@@ -55,19 +55,6 @@ static GameMap maps[2];
 static int current_map_id = 0;
 static GameMap *current_map = &maps[0];
 
-static u64 state_color(int s)
-{
-    switch (s)
-    {
-        case PAD_STATE_DISCONN:  return GS_SETREG_RGBAQ(0x40,0x40,0x40,0x80,0);
-        case PAD_STATE_STABLE:   return GS_SETREG_RGBAQ(0x00,0xFF,0x00,0x80,0);
-        case PAD_STATE_FINDCTP1: return GS_SETREG_RGBAQ(0xFF,0x80,0x00,0x80,0);
-        case PAD_STATE_EXECCMD:  return GS_SETREG_RGBAQ(0x00,0x80,0xFF,0x80,0);
-        case PAD_STATE_ERROR:    return GS_SETREG_RGBAQ(0xFF,0x00,0x00,0x80,0);
-        default:                 return GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0);
-    }
-}
-
 static void parse_assets(void)
 {
     // New Bark Town (ID 0)
@@ -112,7 +99,11 @@ static int is_tile_walkable(int world_x, int world_y)
 {
     int bx = world_x / META_SZ;
     int by = world_y / META_SZ;
-    if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h) return 0;
+
+    if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h)
+    {
+        return 1;
+    }
 
     int in_block_x = (world_x % META_SZ) / TILE_SZ; // 0..3
     int in_block_y = (world_y % META_SZ) / TILE_SZ; // 0..3
@@ -204,35 +195,88 @@ static void update_player_pad(Player *p)
     if (is_walkable(p->wx, ny)) p->wy = ny;
 }
 
+static float clamp_y_to_map(float y, GameMap *m)
+{
+    float max_y = (m->h * META_SZ) - 16.0f;
+    if (y < 16.0f) return 16.0f;
+    if (y > max_y) return max_y;
+    return y;
+}
+
 static void check_map_transition(Player *p1, Player *p2)
 {
-    // if right corner == route29
-    if (current_map_id == 0 && p1->wx > (current_map->w * META_SZ) - 8)
+    if (current_map_id == 0)
     {
-        current_map_id = 1;
-        current_map = &maps[1];
-        p1->wx = 16.0f;
-        p1->wy = current_map->h * META_SZ / 2.0f;
-        p2->wx = 48.0f;
-        p2->wy = current_map->h * META_SZ / 2.0f;
+        Player *leader = NULL;
+        if (p1->wx <= 8.0f) leader = p1;
+        else if (p2->wx <= 8.0f) leader = p2;
+
+        if (leader)
+        {
+            float rel_y = leader->wy;
+
+            current_map_id = 1;
+            current_map = &maps[1];
+
+            leader->wx = (current_map->w * META_SZ) - 32.0f;
+            leader->wy = clamp_y_to_map(rel_y, current_map);
+
+            Player *follower = (leader == p1) ? p2 : p1;
+            follower->wx = (current_map->w * META_SZ) - 64.0f;
+            follower->wy = leader->wy;
+        }
     }
 
-    // if left corner == new bark map
-    else if (current_map_id == 1 && p1->wx < 16.0f)
+    else if (current_map_id == 1)
     {
-        current_map_id = 0;
-        current_map = &maps[0];
-        p1->wx = (current_map->w * META_SZ) - 32.0f;
-        p1->wy = current_map->h * META_SZ / 2.0f;
-        p2->wx = (current_map->w * META_SZ) - 64.0f;
-        p2->wy = current_map->h * META_SZ / 2.0f;
+        Player *leader = NULL;
+        if (p1->wx >= (current_map->w * META_SZ) - 8.0f) leader = p1;
+        else if (p2->wx >= (current_map->w * META_SZ) - 8.0f) leader = p2;
+
+        if (leader)
+        {
+            float rel_y = leader->wy;
+
+            current_map_id = 0;
+            current_map = &maps[0];
+
+            leader->wx = 32.0f;
+            leader->wy = clamp_y_to_map(rel_y, current_map);
+
+            Player *follower = (leader == p1) ? p2 : p1;
+            follower->wx = 64.0f;
+            follower->wy = leader->wy;
+        }
     }
 }
 
 static void update_camera(Player *p, Camera *c)
 {
+    int map_w = current_map->w * META_SZ;
+    int map_h = current_map->h * META_SZ;
+
     c->x = (int)p->wx - VIEW_W / 2;
     c->y = (int)p->wy - SCREEN_H / 2;
+
+    if (map_w > VIEW_W)
+    {
+        if (c->x < 0) c->x = 0;
+        if (c->x > map_w - VIEW_W) c->x = map_w - VIEW_W;
+    }
+    else
+    {
+        c->x = -(VIEW_W - map_w) / 2;
+    }
+
+    if (map_h > SCREEN_H)
+    {
+        if (c->y < 0) c->y = 0;
+        if (c->y > map_h - SCREEN_H) c->y = map_h - SCREEN_H;
+    }
+    else
+    {
+        c->y = -(SCREEN_H - map_h) / 2;
+    }
 }
 
 static void render_map(Camera *c, int offset)
@@ -279,24 +323,17 @@ static void render_map(Camera *c, int offset)
 
 static void render_player(Player *p, Camera *c, int offset)
 {
-    int sx = offset + (int)p->wx - c->x - (PLAYER_SIZE * SCALE / 2);
-    int sy = (int)p->wy - c->y - (PLAYER_SIZE * SCALE / 2);
-    
-    int tv = p->port * 16;
     int tu = (p->direction * 2 + p->anim_frame) * 16;
-    
+    int tv = p->port * 16;
+
+    float sx = (float)offset + (p->wx - (float)c->x) - (PLAYER_SIZE * SCALE) / 2.0f;
+    float sy = (p->wy - (float)c->y) - (PLAYER_SIZE * SCALE) / 2.0f;
+
     gsKit_prim_sprite_texture(gs, &sprite_tex,
         sx, sy, (float)tu, (float)tv,
         sx + (PLAYER_SIZE * SCALE), sy + (PLAYER_SIZE * SCALE),
         (float)(tu + 16), (float)(tv + 16),
         2, GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0));
-}
-
-static void render_leds(Player *p, int offset)
-{
-    gsKit_prim_sprite(gs, offset+4, 4, offset+20, 20, 3, state_color(p->last_state));
-    gsKit_prim_sprite(gs, offset+24, 4, offset+40, 20, 3, (p->last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0) : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
-    gsKit_prim_sprite(gs, offset+44, 4, offset+60, 20, 3, p->stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0) : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
 }
 
 int main(void)
@@ -314,9 +351,7 @@ int main(void)
     gsKit_init_screen(gs);
     gsKit_mode_switch(gs, GS_ONESHOT);
 
-    gsKit_set_primalpha(gs, GS_BLEND_BACK2FRONT, 0);
     gsKit_set_test(gs, GS_ATEST_ON);
-
     gsKit_set_primalpha(gs, GS_SETREG_ALPHA(0, 1, 0, 1, 0), GS_SETREG_ALPHA(0, 1, 0, 1, 0));
 
     padInit(0);
@@ -327,9 +362,10 @@ int main(void)
     upload_tileset();
 
     Player p[2] = {
-        { 0, 0, 320.0f, 400.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-        { 1, 0, 352.0f, 400.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+        { 0, 0, 320.0f, 256.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 352.0f, 256.0f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
     };
+
     Camera cam[2];
 
     while (1)
@@ -347,14 +383,12 @@ int main(void)
         gsKit_prim_sprite(gs, 0, 0, VIEW_W, SCREEN_H, 0, GS_SETREG_RGBAQ(0x10,0x10,0x30,0x80,0));
         render_map(&cam[0], 0);
         render_player(&p[0], &cam[0], 0);
-        render_leds(&p[0], 0);
         gsKit_queue_exec(gs);
 
         gsKit_set_scissor(gs, GS_SETREG_SCISSOR(VIEW_W, SCREEN_W-1, 0, SCREEN_H-1));
         gsKit_prim_sprite(gs, VIEW_W, 0, SCREEN_W, SCREEN_H, 0, GS_SETREG_RGBAQ(0x10,0x10,0x30,0x80,0));
         render_map(&cam[1], VIEW_W);
         render_player(&p[1], &cam[1], VIEW_W);
-        render_leds(&p[1], VIEW_W);
         gsKit_queue_exec(gs);
 
         gsKit_sync_flip(gs);
