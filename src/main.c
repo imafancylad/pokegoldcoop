@@ -64,7 +64,7 @@ static int blink_timer = 0;
 static int dialog_owner = -1;
 static u16 prev_cross[2] = { 0, 0 };
 
-static GameMap maps[2];
+static GameMap maps[4];
 static int current_map_id = 0;
 static GameMap *current_map = &maps[0];
 
@@ -81,6 +81,18 @@ static void parse_assets(void)
     maps[1].h = route29_map[6] | (route29_map[7] << 8);
     maps[1].blocks = &route29_map[8];
     maps[1].collision = &johto_collision[6]; // same collision table
+
+    // Cherrygrove City (ID 2)
+    maps[2].w = cherrygrove_map[4] | (cherrygrove_map[5] << 8);
+    maps[2].h = cherrygrove_map[6] | (cherrygrove_map[7] << 8);
+    maps[2].blocks = &cherrygrove_map[8];
+    maps[2].collision = &johto_collision[6];
+
+    // Route 30 (ID 3)
+    maps[3].w = route30_map[4] | (route30_map[5] << 8);
+    maps[3].h = route30_map[6] | (route30_map[7] << 8);
+    maps[3].blocks = &route30_map[8];
+    maps[3].collision = &johto_collision[6];
 }
 
 static void upload_tileset(void)
@@ -97,7 +109,7 @@ static void upload_tileset(void)
     gsKit_sync_flip(gs);
 
     sprite_tex.Width  = 128;
-    sprite_tex.Height = 32;
+    sprite_tex.Height = 48;
     sprite_tex.PSM    = GS_PSM_CT32;
     sprite_tex.Clut   = GS_CLUT_NONE;
     sprite_tex.Filter = GS_FILTER_NEAREST; // do not touch this
@@ -132,6 +144,9 @@ static int is_tile_walkable(int world_x, int world_y)
 
 static int is_walkable(float x, float y)
 {
+    if (current_map_id == 2 && y < 40.0f) return 1;     // cherrygrove city to route 30
+    if (current_map_id == 3 && y > (current_map->h * META_SZ) - 40.0f) return 1;    // route 30 to cherrygrove city
+
     // put return 1 to make collisions unavailable
     int r = 8;
     if (!is_tile_walkable((int)x - r, (int)y - r)) return 0;
@@ -205,10 +220,49 @@ static void update_player_pad(Player *p)
 
     float max_wx = (float)(current_map->w * META_SZ);
     float max_wy = (float)(current_map->h * META_SZ);
-    if (nx < PLAYER_SIZE/2) nx = PLAYER_SIZE/2;
-    if (ny < PLAYER_SIZE/2) ny = PLAYER_SIZE/2;
-    if (nx > max_wx - PLAYER_SIZE/2) nx = max_wx - PLAYER_SIZE/2;
-    if (ny > max_wy - PLAYER_SIZE/2) ny = max_wy - PLAYER_SIZE/2;
+    float half_sprite = (PLAYER_SIZE * SCALE) / 2.0f;  // 16.0f
+
+    if (current_map_id == 0)
+    {
+        if (nx < -half_sprite) nx = -half_sprite;
+        if (nx > max_wx - half_sprite) nx = max_wx - half_sprite;
+    }
+
+    else if (current_map_id == 1)
+    {
+        if (nx < -half_sprite) nx = -half_sprite;
+        if (nx > max_wx + half_sprite) nx = max_wx + half_sprite;
+    }
+
+    else if (current_map_id == 2)
+    {
+        if (nx < half_sprite) nx = half_sprite;
+        if (nx > max_wx + half_sprite) nx = max_wx + half_sprite;
+    }
+
+    else
+    {
+        if (nx < half_sprite) nx = half_sprite;
+        if (nx > max_wx - half_sprite) nx = max_wx - half_sprite;
+    }
+
+    if (current_map_id == 2)
+    {
+        if (ny < -half_sprite) ny = -half_sprite;
+        if (ny > max_wy - half_sprite) ny = max_wy - half_sprite;
+    }
+
+    else if (current_map_id == 3)
+    {
+        if (ny < half_sprite) ny = half_sprite;
+        if (ny > max_wy + half_sprite) ny = max_wy + half_sprite;
+    }
+
+    else
+    {
+        if (ny < half_sprite) ny = half_sprite;
+        if (ny > max_wy - half_sprite) ny = max_wy - half_sprite;
+    }
 
     if (is_walkable(nx, p->wy)) p->wx = nx;
     if (is_walkable(p->wx, ny)) p->wy = ny;
@@ -224,78 +278,132 @@ static float clamp_y_to_map(float y, GameMap *m)
 
 static void check_map_transition(Player *p1, Player *p2)
 {
-    if (current_map_id == 0)
+    Player *leader = NULL;
+
+    if (p1->wx <= 0.0f) leader = p1;
+    else if (p2->wx <= 0.0f) leader = p2;
+
+    if (leader)
     {
-        Player *leader = NULL;
-        if (p1->wx <= 8.0f) leader = p1;
-        else if (p2->wx <= 8.0f) leader = p2;
+        float rel_y = leader->wy;
+        Player *follower = (leader == p1) ? p2 : p1;
 
-        if (leader)
+        if (current_map_id == 0)
         {
-            float rel_y = leader->wy;
-
             current_map_id = 1;
             current_map = &maps[1];
-
             leader->wx = (current_map->w * META_SZ) - 32.0f;
             leader->wy = clamp_y_to_map(rel_y, current_map);
-
-            Player *follower = (leader == p1) ? p2 : p1;
             follower->wx = (current_map->w * META_SZ) - 64.0f;
+            follower->wy = leader->wy;
+        }
+
+        else if (current_map_id == 1)
+        {
+            current_map_id = 2;
+            current_map = &maps[2];
+            leader->wx = (current_map->w * META_SZ) - 32.0f;
+            leader->wy = clamp_y_to_map(rel_y, current_map);
+            follower->wx = (current_map->w * META_SZ) - 64.0f;
+            follower->wy = leader->wy;
+        }
+
+        return;
+    }
+
+    leader = NULL;
+    if (p1->wx >= (current_map->w * META_SZ)) leader = p1;
+    else if (p2->wx >= (current_map->w * META_SZ)) leader = p2;
+
+    if (leader)
+    {
+        float rel_y = leader->wy;
+        Player *follower = (leader == p1) ? p2 : p1;
+
+        if (current_map_id == 2)
+        {
+            current_map_id = 1;
+            current_map = &maps[1];
+            leader->wx = 32.0f;
+            leader->wy = clamp_y_to_map(rel_y, current_map);
+            follower->wx = 64.0f;
+            follower->wy = leader->wy;
+        }
+
+        else if (current_map_id == 1)
+        {
+            current_map_id = 0;
+            current_map = &maps[0];
+            leader->wx = 32.0f;
+            leader->wy = clamp_y_to_map(rel_y, current_map);
+            follower->wx = 64.0f;
             follower->wy = leader->wy;
         }
     }
 
-    else if (current_map_id == 1)
+    if (current_map_id == 2)
     {
-        Player *leader = NULL;
-        if (p1->wx >= (current_map->w * META_SZ) - 8.0f) leader = p1;
-        else if (p2->wx >= (current_map->w * META_SZ) - 8.0f) leader = p2;
+        leader = NULL;
+        if (p1->wy <= 0.0f) leader = p1;
+        else if (p2->wy <= 0.0f) leader = p2;
 
         if (leader)
         {
-            float rel_y = leader->wy;
-
-            current_map_id = 0;
-            current_map = &maps[0];
-
-            leader->wx = 32.0f;
-            leader->wy = clamp_y_to_map(rel_y, current_map);
-
             Player *follower = (leader == p1) ? p2 : p1;
-            follower->wx = 64.0f;
-            follower->wy = leader->wy;
+
+            current_map_id = 3;
+            current_map = &maps[3];
+
+            float spawn_x = (current_map->w * META_SZ) / 2.0f - 64.0f;
+            float spawn_y = (current_map->h * META_SZ) - 32.0f;
+
+            for (int i = 0; i < 6; i++)
+            {
+                if (is_walkable(spawn_x, spawn_y)) break;
+                spawn_y -= 16.0f;
+            }
+
+            leader->wx = spawn_x;
+            leader->wy = spawn_y;
+            follower->wx = spawn_x + 32.0f;
+            follower->wy = spawn_y;
+        }
+    }
+
+    if (current_map_id == 3)
+    {
+        leader = NULL;
+        if (p1->wy >= (current_map->h * META_SZ)) leader = p1;
+        else if (p2->wy >= (current_map->h * META_SZ)) leader = p2;
+
+        if (leader)
+        {
+            Player *follower = (leader == p1) ? p2 : p1;
+
+            current_map_id = 2;
+            current_map = &maps[2];
+
+            float spawn_x = (current_map->w * META_SZ) / 2.0f - 64.0f;
+            float spawn_y = 32.0f;
+
+            for (int i = 0; i < 6; i++)
+            {
+                if (is_walkable(spawn_x, spawn_y)) break;
+                spawn_y += 16.0f;
+            }
+
+            leader->wx = spawn_x;
+            leader->wy = spawn_y;
+            follower->wx = spawn_x + 32.0f;
+            follower->wy = spawn_y;
         }
     }
 }
 
 static void update_camera(Player *p, Camera *c)
 {
-    int map_w = current_map->w * META_SZ;
-    int map_h = current_map->h * META_SZ;
-
     c->x = (int)p->wx - VIEW_W / 2;
-    c->y = (int)p->wy - SCREEN_H / 2;
-
-    if (map_w > VIEW_W)
-    {
-        if (c->x < 0) c->x = 0;
-        if (c->x > map_w - VIEW_W) c->x = map_w - VIEW_W;
-    }
-    else
-    {
-        c->x = -(VIEW_W - map_w) / 2;
-    }
-
-    if (map_h > SCREEN_H)
-    {
-        if (c->y < 0) c->y = 0;
-        if (c->y > map_h - SCREEN_H) c->y = map_h - SCREEN_H;
-    }
-    else
-    {
-        c->y = -(SCREEN_H - map_h) / 2;
-    }
+    c->y = (int)p->wy - SCREEN_H / 2 + 70;
 }
 
 static void render_map(Camera *c, int offset)
@@ -357,11 +465,13 @@ static void render_npc(NPC *n, Camera *c, int offset)
 
 static void render_player(Player *p, Camera *c, int offset)
 {
-    int tu = (p->direction * 2 + p->anim_frame) * 16;
-    int tv = p->port * 16;
+    int sx = offset + (int)p->wx - c->x - (PLAYER_SIZE * SCALE / 2);
+    int sy = (int)p->wy - c->y - (PLAYER_SIZE * SCALE);
 
-    float sx = (float)offset + (p->wx - (float)c->x) - (PLAYER_SIZE * SCALE) / 2.0f;
-    float sy = (p->wy - (float)c->y) - (PLAYER_SIZE * SCALE) / 2.0f;
+    if (p->anim_frame == 1) sy -= 2;
+
+    int tv = p->port * 16;
+    int tu = (p->direction * 2 + p->anim_frame) * 16;
 
     gsKit_prim_sprite_texture(gs, &sprite_tex,
         sx, sy, (float)tu, (float)tv,
@@ -373,22 +483,59 @@ static void render_player(Player *p, Camera *c, int offset)
 static void render_dialog(int offset)
 {
     if (!dialog_open) return;
-    int bx = offset + 20;
-    int by = SCREEN_H - 120;
-    int bw = VIEW_W - 40;
-    int bh = 100;
 
-    gsKit_prim_sprite(gs, bx, by, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(20, 20, 60, 0x80, 0));
+    int bx = offset + 30;
+    int by = SCREEN_H - 140;
+    int bw = VIEW_W - 60;
+    int bh = 120;
 
-    gsKit_prim_sprite(gs, bx, by, bx+bw, by+4, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
-    gsKit_prim_sprite(gs, bx, by+bh-4, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
-    gsKit_prim_sprite(gs, bx, by, bx+4, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
-    gsKit_prim_sprite(gs, bx+bw-4, by, bx+bw, by+bh, 10, GS_SETREG_RGBAQ(180, 180, 255, 0x80, 0));
+    gsKit_prim_sprite(gs, bx, by, bx+bw, by+bh, 10,
+        GS_SETREG_RGBAQ(255, 0, 255, 0x80, 0));
 
-    if ((blink_timer / 30) % 2 == 0)
-    {
-        gsKit_prim_sprite(gs, bx+bw-30, by+bh-20, bx+bw-10, by+bh-10, 11, GS_SETREG_RGBAQ(255, 255, 100, 0x80, 0));
+    gsKit_prim_sprite(gs, bx+8, by+8, bx+bw-8, by+bh-8, 11,
+        GS_SETREG_RGBAQ(0, 0, 128, 0x80, 0));
+
+    if ((blink_timer / 20) % 2 == 0) {
+        gsKit_prim_sprite(gs, bx+bw/2-20, by+bh/2-20, bx+bw/2+20, by+bh/2+20, 12,
+            GS_SETREG_RGBAQ(255, 255, 0, 0x80, 0));
     }
+}
+
+static u64 state_color(int s)
+{
+    switch (s)
+    {
+        case PAD_STATE_DISCONN:  return GS_SETREG_RGBAQ(0x40,0x40,0x40,0x80,0);
+        case PAD_STATE_STABLE:   return GS_SETREG_RGBAQ(0x00,0xFF,0x00,0x80,0);
+        case PAD_STATE_FINDCTP1: return GS_SETREG_RGBAQ(0xFF,0x80,0x00,0x80,0);
+        case PAD_STATE_EXECCMD:  return GS_SETREG_RGBAQ(0x00,0x80,0xFF,0x80,0);
+        case PAD_STATE_ERROR:    return GS_SETREG_RGBAQ(0xFF,0x00,0x00,0x80,0);
+        default:                 return GS_SETREG_RGBAQ(0xFF,0xFF,0x00,0x80,0);
+    }
+}
+
+static void render_leds(Player *p, int offset)
+{
+    gsKit_prim_sprite(gs, offset+4, 4, offset+20, 20, 3, state_color(p->last_state));
+
+    gsKit_prim_sprite(gs, offset+24, 4, offset+40, 20, 3,
+        (p->last_btns != 0) ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
+                            : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+
+    gsKit_prim_sprite(gs, offset+44, 4, offset+60, 20, 3,
+        p->stick_moved ? GS_SETREG_RGBAQ(0xFF,0xFF,0xFF,0x80,0)
+                       : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+
+    float dx = p->wx - npc.x;
+    float dy = p->wy - npc.y;
+    int cerca = (dx*dx + dy*dy) < 250.0f * 250.0f;
+    gsKit_prim_sprite(gs, offset+64, 4, offset+80, 20, 3,
+        cerca ? GS_SETREG_RGBAQ(0xFF,0xA0,0x00,0x80,0)
+              : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
+
+    gsKit_prim_sprite(gs, offset+84, 4, offset+100, 20, 3,
+        dialog_open ? GS_SETREG_RGBAQ(0x00,0xFF,0x00,0x80,0)
+                    : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
 }
 
 int main(void)
@@ -428,38 +575,39 @@ int main(void)
         blink_timer++;
         update_player_pad(&p[0]);
         update_player_pad(&p[1]);
-        
-        // map transition comprobation
-        check_map_transition(&p[0], &p[1]);
 
         for (int i = 0; i < 2; i++)
         {
-            u16 cur = (p[i].last_btns & PAD_CROSS) ? 1 : 0;
-            int just_pressed = (cur && !prev_cross[i]);
-            prev_cross[i] = cur;
+            int x_now = (p[i].last_btns & PAD_CROSS) ? 1 : 0;
 
-            if (just_pressed)
+            if (x_now && !prev_cross[i])
             {
-                if (!dialog_open)
+                float dx = p[i].wx - npc.x;
+                float dy = p[i].wy - npc.y;
+                float dist_sq = dx*dx + dy*dy;
+                
+                if (current_map_id == 0 && dist_sq < 250.0f * 250.0f)
                 {
-                    float dx = p[i].wx - npc.x;
-                    float dy = p[i].wy - npc.y;
-
-                    if (current_map_id == 0 && fabsf(dx) < 60.0f && fabsf(dy) < 60.0f)
+                    if (!dialog_open)
                     {
                         dialog_open = 1;
                         dialog_owner = i;
                     }
 
-                }
-                else if (dialog_owner == i)
-                {
-                    dialog_open = 0;
-                    dialog_owner = -1;
+                    else if (dialog_owner == i)
+                    {
+                        dialog_open = 0;
+                        dialog_owner = -1;
+                    }
                 }
             }
+
+            prev_cross[i] = x_now;
         }
 
+        // map transition comprobation
+        check_map_transition(&p[0], &p[1]);
+        
         update_camera(&p[0], &cam[0]);
         update_camera(&p[1], &cam[1]);
 
@@ -468,6 +616,7 @@ int main(void)
         render_map(&cam[0], 0);
         render_npc(&npc, &cam[0], 0);
         render_player(&p[0], &cam[0], 0);
+        render_leds(&p[0], 0);
         render_dialog(0);
         gsKit_queue_exec(gs);
 
@@ -476,6 +625,7 @@ int main(void)
         render_map(&cam[1], VIEW_W);
         render_npc(&npc, &cam[1], VIEW_W);
         render_player(&p[1], &cam[1], VIEW_W);
+        render_leds(&p[1], VIEW_W);
         render_dialog(VIEW_W);
         gsKit_queue_exec(gs);
 

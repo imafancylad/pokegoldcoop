@@ -7,6 +7,8 @@ ROOT = Path.home() / "proyectos/pokegold"
 MAPS = {
     "NewBarkTown": {"w": 10, "h": 9,  "out": "newbark_map.bin"},
     "Route29":     {"w": 30, "h": 9,  "out": "route29_map.bin"},
+    "CherrygroveCity":{"w": 20, "h": 9, "out": "cherrygrove_map.bin"},
+    "Route30":         {"w": 10, "h": 27, "out": "route30_map.bin"},
 }
 
 def main():

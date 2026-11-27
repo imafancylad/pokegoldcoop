@@ -8,6 +8,8 @@ ASSETS = [
     ("johto_blocks.bin",      "johto_blocks"),
     ("newbark_map.bin",       "newbark_map"),
     ("route29_map.bin",       "route29_map"),
+    ("cherrygrove_map.bin",   "cherrygrove_map"),
+    ("route30_map.bin",       "route30_map"),
     ("johto_collision.bin",   "johto_collision"),
     ("sprites.rgba",          "sprites"),
 ]
