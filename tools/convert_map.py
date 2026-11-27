@@ -9,6 +9,8 @@ MAPS = {
     "Route29":     {"w": 30, "h": 9,  "out": "route29_map.bin"},
     "CherrygroveCity":{"w": 20, "h": 9, "out": "cherrygrove_map.bin"},
     "Route30":         {"w": 10, "h": 27, "out": "route30_map.bin"},
+    "PlayersHouse1F":  {"w": 5,  "h": 4,  "out": "players_house_map.bin"},
+    "ElmsLab":         {"w": 6,  "h": 5,  "out": "elms_lab_map.bin"},
 }
 
 def main():

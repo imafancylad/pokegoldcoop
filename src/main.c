@@ -13,7 +13,6 @@
 #define SRC_TILE  8
 #define SCALE     2
 #define TILE_SZ   (SRC_TILE * SCALE)
-#define META_SZ   (TILE_SZ * 4)
 #define TEX_TILES_W 16
 #define TEX_TILES_H 16
 
@@ -27,6 +26,8 @@ typedef struct {
     int w, h;
     const uint8_t *blocks;
     const uint8_t *collision;
+    int tileset_id; // 0 = johto, 1 = players_house, 2 = elms_lab
+    int tiles_per_block; // outside 4, inside 2
 } GameMap;
 
 typedef struct {
@@ -57,42 +58,105 @@ typedef struct {
 static GSGLOBAL *gs;
 static GSTEXTURE tile_tex;
 static GSTEXTURE sprite_tex;
+static GSTEXTURE house_tex;
+static GSTEXTURE lab_tex;
+
+typedef struct {
+    int     from_map;
+    float   from_x, from_y;
+    int     to_map;
+    float   to_x, to_y;
+} Warp;
+
+static Warp warps[] = {
+    // Playerhouse: (160, 160)
+    { 0, 160.0f, 416.0f, 4, 112.0f, 48.0f },
+    // House1F: door (160, 224) goes to NBT (160, 448)
+    { 4, 112.0f, 112.0f, 0, 160.0f, 448.0f },
+
+    // Lab: NBT door (160, 160) enter lab in (224, 224)
+    { 0, 160.0f, 160.0f, 5, 160.0f, 48.0f },
+    // ElmsLab: door (224, 288) goes to NBT (160, 192)
+    { 5, 160.0f, 112.0f, 0, 160.0f, 192.0f },
+};
+
+static const int NUM_WARPS = sizeof(warps) / sizeof(warps[0]);
 
 static NPC npc = { 320.0f, 320.0f, 2, "hola elisabet, te amo mucho preciosa." };
+static int warp_cooldown = 0;
 static int dialog_open = 0;
 static int blink_timer = 0;
 static int dialog_owner = -1;
 static u16 prev_cross[2] = { 0, 0 };
 
-static GameMap maps[4];
+static GameMap maps[6];
 static int current_map_id = 0;
 static GameMap *current_map = &maps[0];
 
+static int get_meta_sz(void)
+{
+    return TILE_SZ * current_map->tiles_per_block;
+}
+
 static void parse_assets(void)
 {
+    const uint8_t *johto_blk   = &johto_blocks[6];
+    const uint8_t *johto_col   = &johto_collision[6];
+    const uint8_t *house_blk   = &players_house_blocks[6];
+    const uint8_t *house_col   = &players_house_collision[6];
+    const uint8_t *lab_blk     = &lab_blocks[6];
+    const uint8_t *lab_col     = &lab_collision[6];
+
+    maps[0].tiles_per_block = 4;
+    maps[1].tiles_per_block = 4;
+    maps[2].tiles_per_block = 4;
+    maps[3].tiles_per_block = 4;
+    maps[4].tiles_per_block = 2; // PlayersHouse1F
+    maps[5].tiles_per_block = 2; // ElmsLab
+
     // New Bark Town (ID 0)
     maps[0].w = newbark_map[4] | (newbark_map[5] << 8);
     maps[0].h = newbark_map[6] | (newbark_map[7] << 8);
     maps[0].blocks = &newbark_map[8];
-    maps[0].collision = &johto_collision[6];
+    maps[0].collision = johto_col;
+    maps[0].tileset_id = 0;
 
     // Route 29 (ID 1)
     maps[1].w = route29_map[4] | (route29_map[5] << 8);
     maps[1].h = route29_map[6] | (route29_map[7] << 8);
     maps[1].blocks = &route29_map[8];
-    maps[1].collision = &johto_collision[6]; // same collision table
+    maps[1].collision = johto_col;
+    maps[1].tileset_id = 0;
 
     // Cherrygrove City (ID 2)
     maps[2].w = cherrygrove_map[4] | (cherrygrove_map[5] << 8);
     maps[2].h = cherrygrove_map[6] | (cherrygrove_map[7] << 8);
     maps[2].blocks = &cherrygrove_map[8];
-    maps[2].collision = &johto_collision[6];
+    maps[2].collision = johto_col;
+    maps[2].tileset_id = 0;
 
     // Route 30 (ID 3)
     maps[3].w = route30_map[4] | (route30_map[5] << 8);
     maps[3].h = route30_map[6] | (route30_map[7] << 8);
     maps[3].blocks = &route30_map[8];
-    maps[3].collision = &johto_collision[6];
+    maps[3].collision = johto_col;
+    maps[3].tileset_id = 0;
+
+    // PlayersHouse1F (ID 4)
+    maps[4].w = players_house_map[4] | (players_house_map[5] << 8);
+    maps[4].h = players_house_map[6] | (players_house_map[7] << 8);
+    maps[4].blocks = &players_house_map[8];
+    maps[4].collision = house_col;
+    maps[4].tileset_id = 1;
+
+    // ElmsLab (ID 5)
+    maps[5].w = elms_lab_map[4] | (elms_lab_map[5] << 8);
+    maps[5].h = elms_lab_map[6] | (elms_lab_map[7] << 8);
+    maps[5].blocks = &elms_lab_map[8];
+    maps[5].collision = lab_col;
+    maps[5].tileset_id = 2;
+
+    (void)johto_blk; (void)house_blk; (void)lab_blk;
 }
 
 static void upload_tileset(void)
@@ -118,24 +182,49 @@ static void upload_tileset(void)
     gsKit_texture_upload(gs, &sprite_tex);
     gsKit_queue_exec(gs);
     gsKit_sync_flip(gs);
+
+    house_tex.Width  = 128;
+    house_tex.Height = 128;
+    house_tex.PSM    = GS_PSM_CT32;
+    house_tex.Clut   = GS_CLUT_NONE;
+    house_tex.Filter = GS_FILTER_NEAREST;
+    house_tex.Mem    = (u32*)&players_house_tiles[16];
+    house_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(128, 128, house_tex.PSM), 128);
+    gsKit_texture_upload(gs, &house_tex);
+    gsKit_queue_exec(gs);
+    gsKit_sync_flip(gs);
+
+    lab_tex.Width  = 128;
+    lab_tex.Height = 128;
+    lab_tex.PSM    = GS_PSM_CT32;
+    lab_tex.Clut   = GS_CLUT_NONE;
+    lab_tex.Filter = GS_FILTER_NEAREST;
+    lab_tex.Mem    = (u32*)&lab_tiles[16];
+    lab_tex.Vram   = gsKit_vram_alloc(gs, gsKit_texture_size(128, 128, lab_tex.PSM), 128);
+    gsKit_texture_upload(gs, &lab_tex);
+    gsKit_queue_exec(gs);
+    gsKit_sync_flip(gs);
 }
 
 static int is_tile_walkable(int world_x, int world_y)
 {
-    int bx = world_x / META_SZ;
-    int by = world_y / META_SZ;
+    int meta_sz = get_meta_sz();
+    int bx = world_x / meta_sz;
+    int by = world_y / meta_sz;
 
-    if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h)
-    {
-        return 1;
-    }
+    if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h) return 1;
 
-    int in_block_x = (world_x % META_SZ) / TILE_SZ; // 0..3
-    int in_block_y = (world_y % META_SZ) / TILE_SZ; // 0..3
+    int in_block_x = (world_x % meta_sz) / TILE_SZ;
+    int in_block_y = (world_y % meta_sz) / TILE_SZ;
 
     int block_id = current_map->blocks[by * current_map->w + bx];
-    const uint8_t *blocks = &johto_blocks[6];
-    int tile_id = blocks[block_id * 16 + (in_block_y * 4 + in_block_x)]; // *16, *4
+    const uint8_t *blocks;
+    if (current_map->tileset_id == 1) blocks = &players_house_blocks[6];
+    else if (current_map->tileset_id == 2) blocks = &lab_blocks[6];
+    else blocks = &johto_blocks[6];
+
+    int max_tiles = current_map->tiles_per_block * current_map->tiles_per_block;
+    int tile_id = blocks[block_id * max_tiles + (in_block_y * current_map->tiles_per_block + in_block_x)];
 
     if (tile_id >= TEX_TILES_W * TEX_TILES_H) return 0;
 
@@ -145,7 +234,7 @@ static int is_tile_walkable(int world_x, int world_y)
 static int is_walkable(float x, float y)
 {
     if (current_map_id == 2 && y < 40.0f) return 1;     // cherrygrove city to route 30
-    if (current_map_id == 3 && y > (current_map->h * META_SZ) - 40.0f) return 1;    // route 30 to cherrygrove city
+    if (current_map_id == 3 && y > (current_map->h * get_meta_sz()) - 40.0f) return 1;    // route 30 to cherrygrove city
 
     // put return 1 to make collisions unavailable
     int r = 8;
@@ -218,8 +307,8 @@ static void update_player_pad(Player *p)
         p->walk_timer = 0;
     }
 
-    float max_wx = (float)(current_map->w * META_SZ);
-    float max_wy = (float)(current_map->h * META_SZ);
+    float max_wx = (float)(current_map->w * get_meta_sz());
+    float max_wy = (float)(current_map->h * get_meta_sz());
     float half_sprite = (PLAYER_SIZE * SCALE) / 2.0f;  // 16.0f
 
     if (current_map_id == 0)
@@ -270,7 +359,7 @@ static void update_player_pad(Player *p)
 
 static float clamp_y_to_map(float y, GameMap *m)
 {
-    float max_y = (m->h * META_SZ) - 16.0f;
+    float max_y = (m->h * get_meta_sz()) - 16.0f;
     if (y < 16.0f) return 16.0f;
     if (y > max_y) return max_y;
     return y;
@@ -292,9 +381,9 @@ static void check_map_transition(Player *p1, Player *p2)
         {
             current_map_id = 1;
             current_map = &maps[1];
-            leader->wx = (current_map->w * META_SZ) - 32.0f;
+            leader->wx = (current_map->w * get_meta_sz()) - 32.0f;
             leader->wy = clamp_y_to_map(rel_y, current_map);
-            follower->wx = (current_map->w * META_SZ) - 64.0f;
+            follower->wx = (current_map->w * get_meta_sz()) - 64.0f;
             follower->wy = leader->wy;
         }
 
@@ -302,9 +391,9 @@ static void check_map_transition(Player *p1, Player *p2)
         {
             current_map_id = 2;
             current_map = &maps[2];
-            leader->wx = (current_map->w * META_SZ) - 32.0f;
+            leader->wx = (current_map->w * get_meta_sz()) - 32.0f;
             leader->wy = clamp_y_to_map(rel_y, current_map);
-            follower->wx = (current_map->w * META_SZ) - 64.0f;
+            follower->wx = (current_map->w * get_meta_sz()) - 64.0f;
             follower->wy = leader->wy;
         }
 
@@ -312,8 +401,8 @@ static void check_map_transition(Player *p1, Player *p2)
     }
 
     leader = NULL;
-    if (p1->wx >= (current_map->w * META_SZ)) leader = p1;
-    else if (p2->wx >= (current_map->w * META_SZ)) leader = p2;
+    if (p1->wx >= (current_map->w * get_meta_sz())) leader = p1;
+    else if (p2->wx >= (current_map->w * get_meta_sz())) leader = p2;
 
     if (leader)
     {
@@ -354,8 +443,8 @@ static void check_map_transition(Player *p1, Player *p2)
             current_map_id = 3;
             current_map = &maps[3];
 
-            float spawn_x = (current_map->w * META_SZ) / 2.0f - 64.0f;
-            float spawn_y = (current_map->h * META_SZ) - 32.0f;
+            float spawn_x = (current_map->w * get_meta_sz()) / 2.0f - 64.0f;
+            float spawn_y = (current_map->h * get_meta_sz()) - 32.0f;
 
             for (int i = 0; i < 6; i++)
             {
@@ -373,8 +462,8 @@ static void check_map_transition(Player *p1, Player *p2)
     if (current_map_id == 3)
     {
         leader = NULL;
-        if (p1->wy >= (current_map->h * META_SZ)) leader = p1;
-        else if (p2->wy >= (current_map->h * META_SZ)) leader = p2;
+        if (p1->wy >= (current_map->h * get_meta_sz())) leader = p1;
+        else if (p2->wy >= (current_map->h * get_meta_sz())) leader = p2;
 
         if (leader)
         {
@@ -383,7 +472,7 @@ static void check_map_transition(Player *p1, Player *p2)
             current_map_id = 2;
             current_map = &maps[2];
 
-            float spawn_x = (current_map->w * META_SZ) / 2.0f - 64.0f;
+            float spawn_x = (current_map->w * get_meta_sz()) / 2.0f - 64.0f;
             float spawn_y = 32.0f;
 
             for (int i = 0; i < 6; i++)
@@ -400,20 +489,156 @@ static void check_map_transition(Player *p1, Player *p2)
     }
 }
 
+static void check_warps(Player *p1, Player *p2)
+{
+    if (warp_cooldown > 0) return;
+
+    Player *leader = NULL;
+
+    if (current_map_id == 0)
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            Player *p = (i == 0) ? p1 : p2;
+            int bx = (int)p->wx / get_meta_sz();
+            int by = (int)p->wy / get_meta_sz();
+            if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h) continue;
+
+            int block_id = current_map->blocks[by * current_map->w + bx];
+
+            if (block_id == 0x47 && by < 5) {
+                leader = p;
+                leader->wx = 160.0f;
+                leader->wy = 224.0f;
+                break;
+            }
+
+            if ((block_id == 0x04 || block_id == 0x47) && by >= 5) {
+                leader = p;
+                leader->wx = 112.0f;
+                leader->wy = 48.0f;
+                break;
+            }
+        }
+
+        if (leader)
+        {
+            Player *follower = (leader == p1) ? p2 : p1;
+
+            if (leader->wx == 160.0f)
+            {
+                current_map_id = 5;
+                current_map = &maps[5];
+                follower->wx = 192.0f;
+                follower->wy = 224.0f;
+            }
+            
+            else
+            {
+                current_map_id = 4;
+                current_map = &maps[4];
+                follower->wx = 144.0f;
+                follower->wy = 48.0f;
+            }
+
+            warp_cooldown = 30;
+            return;
+        }
+
+        return;
+    }
+
+    if (current_map_id == 4 || current_map_id == 5) {
+        int bx, by, block_id;
+        for (int i = 0; i < 2; i++) {
+            Player *p = (i == 0) ? p1 : p2;
+            bx = (int)p->wx / get_meta_sz();
+            by = (int)p->wy / get_meta_sz();
+            if (bx < 0 || bx >= current_map->w || by < 0 || by >= current_map->h) continue;
+            block_id = current_map->blocks[by * current_map->w + bx];
+
+            if (block_id == 0x06) {
+                leader = p;
+                break;
+            }
+        }
+
+        if (leader) {
+            Player *follower = (leader == p1) ? p2 : p1;
+            if (current_map_id == 4) {
+                current_map_id = 0;
+                current_map = &maps[0];
+                leader->wx = 160.0f;
+                leader->wy = 448.0f;
+                follower->wx = 192.0f;
+                follower->wy = 448.0f;
+            } else { // Lab -> NBT
+                current_map_id = 0;
+                current_map = &maps[0];
+                leader->wx = 160.0f;
+                leader->wy = 192.0f;
+                follower->wx = 192.0f;
+                follower->wy = 192.0f;
+            }
+            warp_cooldown = 30;
+        }
+    }
+}
+
 static void update_camera(Player *p, Camera *c)
 {
-    c->x = (int)p->wx - VIEW_W / 2;
-    c->y = (int)p->wy - SCREEN_H / 2 + 70;
+    int meta_sz = get_meta_sz();
+    int map_w = current_map->w * meta_sz;
+    int map_h = current_map->h * meta_sz;
+
+    if (map_w <= VIEW_W)
+    {
+        c->x = -(VIEW_W - map_w) / 2;
+    }
+    
+    else
+    {
+        c->x = (int)p->wx - VIEW_W / 2;
+    }
+
+    if (map_h <= SCREEN_H)
+    {
+        c->y = -(SCREEN_H - map_h) / 2;
+    }
+    
+    else
+    {
+        c->y = (int)p->wy - SCREEN_H / 2 + 70;
+    }
 }
 
 static void render_map(Camera *c, int offset)
 {
-    const uint8_t *blocks = &johto_blocks[6];
+    const uint8_t *blocks;
+    GSTEXTURE *tex;
 
-    int bx_start = c->x / META_SZ;
-    int by_start = c->y / META_SZ;
-    int bx_end   = (c->x + VIEW_W) / META_SZ + 1;
-    int by_end   = (c->y + SCREEN_H) / META_SZ + 1;
+    if (current_map->tileset_id == 1)
+    {
+        blocks = &players_house_blocks[6];
+        tex = &house_tex;
+    }
+    
+    else if (current_map->tileset_id == 2)
+    {
+        blocks = &lab_blocks[6];
+        tex = &lab_tex;
+    }
+    
+    else
+    {
+        blocks = &johto_blocks[6];
+        tex = &tile_tex;
+    }
+
+    int bx_start = c->x / get_meta_sz();
+    int by_start = c->y / get_meta_sz();
+    int bx_end   = (c->x + VIEW_W) / get_meta_sz() + 1;
+    int by_end   = (c->y + SCREEN_H) / get_meta_sz() + 1;
     if (bx_start < 0) bx_start = 0;
     if (by_start < 0) by_start = 0;
     if (bx_end > current_map->w) bx_end = current_map->w;
@@ -426,19 +651,21 @@ static void render_map(Camera *c, int offset)
             int bidx = current_map->blocks[by * current_map->w + bx];
             const uint8_t *mt = &blocks[bidx * 16];
 
-            int sx = offset + bx * META_SZ - c->x;
-            int sy = by * META_SZ - c->y;
+            int sx = offset + bx * get_meta_sz() - c->x;
+            int sy = by * get_meta_sz() - c->y;
 
-            for (int i = 0; i < 16; i++)
+            int max_tiles = current_map->tiles_per_block * current_map->tiles_per_block;
+            for (int i = 0; i < max_tiles; i++)
             {
                 int t = mt[i];
                 if (t >= TEX_TILES_W * TEX_TILES_H) continue;
                 int tu = (t % TEX_TILES_W) * SRC_TILE;
                 int tv = (t / TEX_TILES_W) * SRC_TILE;
-                int dx = sx + (i & 3) * TILE_SZ;
-                int dy = sy + (i >> 2) * TILE_SZ;
+                
+                int dx = sx + (i % current_map->tiles_per_block) * TILE_SZ;
+                int dy = sy + (i / current_map->tiles_per_block) * TILE_SZ;
 
-                gsKit_prim_sprite_texture(gs, &tile_tex,
+                gsKit_prim_sprite_texture(gs, tex,
                     (float)dx, (float)dy, (float)tu + 0.5f, (float)tv + 0.5f,
                     (float)(dx + TILE_SZ), (float)(dy + TILE_SZ),
                     (float)(tu + SRC_TILE) - 0.01f, (float)(tv + SRC_TILE) - 0.01f,
@@ -528,9 +755,10 @@ static void render_leds(Player *p, int offset)
 
     float dx = p->wx - npc.x;
     float dy = p->wy - npc.y;
-    int cerca = (dx*dx + dy*dy) < 250.0f * 250.0f;
+    int near = (dx*dx + dy*dy) < 250.0f * 250.0f;
+
     gsKit_prim_sprite(gs, offset+64, 4, offset+80, 20, 3,
-        cerca ? GS_SETREG_RGBAQ(0xFF,0xA0,0x00,0x80,0)
+        near ? GS_SETREG_RGBAQ(0xFF,0xA0,0x00,0x80,0)
               : GS_SETREG_RGBAQ(0x20,0x20,0x20,0x80,0));
 
     gsKit_prim_sprite(gs, offset+84, 4, offset+100, 20, 3,
@@ -573,6 +801,7 @@ int main(void)
     while (1)
     {
         blink_timer++;
+        if (warp_cooldown > 0) warp_cooldown--;
         update_player_pad(&p[0]);
         update_player_pad(&p[1]);
 
@@ -607,6 +836,7 @@ int main(void)
 
         // map transition comprobation
         check_map_transition(&p[0], &p[1]);
+        check_warps(&p[0], &p[1]);
         
         update_camera(&p[0], &cam[0]);
         update_camera(&p[1], &cam[1]);

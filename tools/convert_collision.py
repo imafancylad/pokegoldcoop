@@ -22,40 +22,39 @@ COLLISION_MAP = {
 WALKABLE = {0, 2, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}
 
 def main():
-    if not COLL_ASM.exists():
-        sys.exit(f"No se encuentra {COLL_ASM}")
+    files = [
+        ("johto",         ROOT / "data/tilesets/johto_collision.asm",          Path("data/generated/johto_collision.bin")),
+        ("players_house", ROOT / "data/tilesets/players_house_collision.asm",  Path("data/generated/players_house_collision.bin")),
+        ("lab",           ROOT / "data/tilesets/lab_collision.asm",            Path("data/generated/lab_collision.bin")),
+    ]
 
-    collisions = []
-    with open(COLL_ASM) as f:
-        for line in f:
-            s = line.strip()
-            if s.startswith("tilecoll"):
-                s = s.split(';')[0].strip()
-                parts = s.split(None, 1)[1].split(",")
-                for p in parts:
-                    p = p.strip()
-                    if not p:
-                        continue
-                    
-                    if p in COLLISION_MAP:
-                        val = COLLISION_MAP[p]
-                    else:
+    for name, src, dst in files:
+        if not src.exists():
+            print(f"WARNING: does not exist {src}")
+            continue
+
+        collisions = []
+        with open(src) as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("tilecoll"):
+                    s = s.split(';')[0].strip()
+                    parts = s.split(None, 1)[1].split(",")
+                    for p in parts:
+                        p = p.strip()
+                        if not p: continue
                         try:
                             val = int(p, 16)
                         except ValueError:
-                            val = 0
-                    
-                    if val in WALKABLE:
-                        collisions.append(0)
-                    else:
-                        collisions.append(1)
+                            val = COLLISION_MAP.get(p, 0)
+                        collisions.append(0 if val == 0 else 1)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT, "wb") as f:
-        f.write(b"JCOL")
-        f.write(struct.pack("<H", len(collisions)))
-        f.write(bytes(collisions))
-    print(f"OK: {OUT} ({len(collisions)} tiles, {OUT.stat().st_size} bytes)")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with open(dst, "wb") as f:
+            f.write(b"JCOL")
+            f.write(struct.pack("<H", len(collisions)))
+            f.write(bytes(collisions))
+        print(f"OK: {dst} ({len(collisions)} tiles)")
 
 if __name__ == "__main__":
     main()

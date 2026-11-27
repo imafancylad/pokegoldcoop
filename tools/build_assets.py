@@ -9,6 +9,7 @@ SCRIPTS = [
     "convert_blockset.py",
     "convert_map.py",
     "convert_collision.py",
+    "convert_indoor.py",
     "convert_sprites.py",
 ]
 
